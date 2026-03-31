@@ -1,1371 +1,1547 @@
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon, Circle, FancyArrow
-import numpy as np
+"""
+hydronet_generator.py
+=====================
+Generates HydroNet_Chittagong_Resilience_Final.pptx — a 14-slide, production-grade
+university project presentation on:
+  "CHITTAGONG HYDROLOGICAL RESILIENCE — A Multi-Zone IoT Network for
+   Flash Flood & Tidal Surge Mitigation"
+
+Dependencies: python-pptx, networkx, matplotlib, Pillow, numpy
+Run:  python hydronet_generator.py
+"""
+
 import io
+import math
+import os
+import textwrap
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.oxml.ns import qn
-from lxml import etree
+from pptx.util import Inches, Pt, Emu
 
-# ── Color Palette ──────────────────────────────────────────────────────────────
-PRIMARY_BLUE  = RGBColor(0x1a, 0x3a, 0x6b)
-TEAL          = RGBColor(0x00, 0xb4, 0xd8)
-TEAL_BRIGHT   = RGBColor(0x00, 0xd4, 0xff)
-ORANGE        = RGBColor(0xff, 0x8c, 0x00)
-ORANGE_ALERT  = RGBColor(0xe6, 0x5c, 0x00)
-PURPLE        = RGBColor(0x7c, 0x3a, 0xed)
-GREEN_ACCENT  = RGBColor(0x2e, 0xa0, 0x4e)
-DARK_SLATE    = RGBColor(0x2d, 0x3d, 0x4f)
-LIGHT_GRAY    = RGBColor(0xf0, 0xf0, 0xf0)
-WHITE         = RGBColor(0xff, 0xff, 0xff)
-NAVY          = RGBColor(0x1a, 0x23, 0x32)
+# ─────────────────────────────────────────────────────────────────────────────
+# COLOUR PALETTE
+# ─────────────────────────────────────────────────────────────────────────────
+PRIMARY_BLUE  = RGBColor(0x1a, 0x23, 0x32)
+TEAL_ACCENT   = RGBColor(0x00, 0xd4, 0xff)
+WHITE_CLEAN   = RGBColor(0xff, 0xff, 0xff)
+GREEN_ACCENT  = RGBColor(0x2e, 0xcc, 0x71)
+DARK_SLATE    = RGBColor(0x0f, 0x14, 0x19)
+LIGHT_GRAY    = RGBColor(0xe8, 0xea, 0xed)
+ORANGE_ALERT  = RGBColor(0xff, 0x6b, 0x35)
+PURPLE_ZONE   = RGBColor(0x9b, 0x59, 0xb6)
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def set_bg(slide, color):
-    bg = slide.background
-    fill = bg.fill
-    fill.solid()
-    fill.fore_color.rgb = color
+# hex helpers for matplotlib
+_HEX = {
+    "navy":   "#1a2332",
+    "teal":   "#00d4ff",
+    "white":  "#ffffff",
+    "green":  "#2ecc71",
+    "slate":  "#0f1419",
+    "lgray":  "#e8eaed",
+    "orange": "#ff6b35",
+    "purple": "#9b59b6",
+}
 
-
-def add_footer(slide, slide_num, W, H):
-    fb = slide.shapes.add_textbox(Inches(0.2), H - Inches(0.35), Inches(8), Inches(0.3))
-    tf = fb.text_frame
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = "HydroNet - Chittagong Hydrological Resilience"
-    r.font.size = Pt(8)
-    r.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
-    p.alignment = PP_ALIGN.LEFT
-
-    nb = slide.shapes.add_textbox(W - Inches(1), H - Inches(0.35), Inches(0.8), Inches(0.3))
-    tf2 = nb.text_frame
-    p2 = tf2.paragraphs[0]
-    r2 = p2.add_run()
-    r2.text = str(slide_num)
-    r2.font.size = Pt(8)
-    r2.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
-    p2.alignment = PP_ALIGN.RIGHT
+SLIDE_W = Inches(13.33)
+SLIDE_H = Inches(7.5)
 
 
-def add_title(slide, text, top=Inches(0.3), color=None):
-    if color is None:
-        color = PRIMARY_BLUE
-    tb = slide.shapes.add_textbox(Inches(0.4), top, Inches(9.2), Inches(0.6))
-    tf = tb.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = text
-    r.font.size = Pt(30)
-    r.font.bold = True
-    r.font.color.rgb = color
-    r.font.name = 'Calibri'
-    return tb
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def add_teal_underline(slide, top_offset):
-    ul = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(0.4), top_offset, Inches(9.2), Inches(0.045)
+def add_rect(slide, left, top, width, height, fill: RGBColor | None = None,
+             line: RGBColor | None = None, line_w: float = 1.0):
+    shape = slide.shapes.add_shape(
+        1,  # MSO_SHAPE_TYPE.RECTANGLE
+        left, top, width, height
     )
-    ul.fill.solid()
-    ul.fill.fore_color.rgb = TEAL
-    ul.line.fill.background()
-
-
-def fig_to_buf(fig):
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
-    plt.close(fig)
-    return buf
-
-
-def add_fade_transition(slide):
-    slide_elem = slide._element
-    transition = etree.SubElement(slide_elem, qn('p:transition'))
-    transition.set('spd', 'slow')
-    etree.SubElement(transition, qn('p:fade'))
-
-
-def add_rect(slide, l, t, w, h, fill_color, line_color=None, line_width=None):
-    shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, l, t, w, h)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = fill_color
-    if line_color:
-        shape.line.color.rgb = line_color
-        if line_width:
-            shape.line.width = Pt(line_width)
+    if fill:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill
+    else:
+        shape.fill.background()
+    if line:
+        shape.line.color.rgb = line
+        shape.line.width = Pt(line_w)
     else:
         shape.line.fill.background()
     return shape
 
 
-def add_textbox(slide, text, l, t, w, h, font_size=10, bold=False, italic=False,
-                color=None, align=PP_ALIGN.LEFT, wrap=True, name='Calibri'):
-    if color is None:
-        color = DARK_SLATE
-    tb = slide.shapes.add_textbox(l, t, w, h)
-    tf = tb.text_frame
-    tf.word_wrap = wrap
+def add_textbox(slide, left, top, width, height, text, font_name="Calibri",
+                font_size=12, bold=False, italic=False, color=None,
+                align=PP_ALIGN.LEFT, word_wrap=True):
+    txb = slide.shapes.add_textbox(left, top, width, height)
+    tf = txb.text_frame
+    tf.word_wrap = word_wrap
     p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = text
-    r.font.size = Pt(font_size)
-    r.font.bold = bold
-    r.font.italic = italic
-    r.font.color.rgb = color
-    r.font.name = name
     p.alignment = align
-    return tb
-
-
-# ── Presentation setup ─────────────────────────────────────────────────────────
-prs = Presentation()
-prs.slide_width  = Inches(10)
-prs.slide_height = Inches(5.625)
-W = prs.slide_width
-H = prs.slide_height
-blank = prs.slide_layouts[6]
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 1 — Title Slide
-# ══════════════════════════════════════════════════════════════════════════════
-s1 = prs.slides.add_slide(blank)
-set_bg(s1, NAVY)
-
-fig, ax = plt.subplots(figsize=(10, 5.625))
-ax.set_xlim(0, 10); ax.set_ylim(0, 5.625)
-ax.set_facecolor('#1a2332'); fig.patch.set_facecolor('#1a2332')
-stripe = Polygon([[2, 5.625], [4.5, 5.625], [8.5, 0], [6, 0]],
-                 closed=True, color='#00b4d8', alpha=0.12)
-ax.add_patch(stripe)
-stripe2 = Polygon([[0, 3.5], [0, 5.625], [1.5, 5.625], [0, 4.5]],
-                  closed=True, color='#00d4ff', alpha=0.08)
-ax.add_patch(stripe2)
-ax.axis('off')
-buf = fig_to_buf(fig)
-s1.shapes.add_picture(buf, 0, 0, W, H)
-
-# Banner behind title
-banner = add_rect(s1, Inches(0.5), Inches(1.05), Inches(9), Inches(0.85),
-                  RGBColor(0x00, 0x60, 0x80))
-banner.line.fill.background()
-
-# Title
-tb = s1.shapes.add_textbox(Inches(0.5), Inches(1.05), Inches(9), Inches(0.85))
-tf = tb.text_frame; tf.word_wrap = True
-p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
-r = p.add_run()
-r.text = "CHITTAGONG HYDROLOGICAL RESILIENCE NETWORK"
-r.font.size = Pt(26); r.font.bold = True
-r.font.color.rgb = WHITE; r.font.name = 'Calibri'
-
-# Subtitle
-tb2 = s1.shapes.add_textbox(Inches(0.5), Inches(2.05), Inches(9), Inches(0.5))
-tf2 = tb2.text_frame; tf2.word_wrap = True
-p2 = tf2.paragraphs[0]; p2.alignment = PP_ALIGN.CENTER
-r2 = p2.add_run()
-r2.text = "HydroNet: Cisco-Powered Real-Time Flood Monitoring & Early Warning System"
-r2.font.size = Pt(14); r2.font.italic = True
-r2.font.color.rgb = TEAL; r2.font.name = 'Calibri'
-
-# Team block
-tb3 = s1.shapes.add_textbox(Inches(1), Inches(2.75), Inches(8), Inches(0.4))
-tf3 = tb3.text_frame; p3 = tf3.paragraphs[0]; p3.alignment = PP_ALIGN.CENTER
-r3 = p3.add_run()
-r3.text = "Abu Md. Selim  |  Arifur Rahman  |  Sadab Abdullah"
-r3.font.size = Pt(11); r3.font.color.rgb = WHITE; r3.font.name = 'Calibri'
-
-# Org
-tb4 = s1.shapes.add_textbox(Inches(0.5), Inches(3.2), Inches(9), Inches(0.35))
-tf4 = tb4.text_frame; p4 = tf4.paragraphs[0]; p4.alignment = PP_ALIGN.CENTER
-r4 = p4.add_run()
-r4.text = "Premier University, Chittagong  •  6th Semester Network Architecture Project  •  March 2025"
-r4.font.size = Pt(10); r4.font.color.rgb = RGBColor(0xcc, 0xcc, 0xcc)
-
-# Decorative circles bottom-left
-circle_colors = [TEAL, ORANGE, PURPLE, GREEN_ACCENT]
-for i, cc in enumerate(circle_colors):
-    cx = Inches(0.4 + i * 0.42)
-    cy = H - Inches(0.7)
-    c = s1.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.OVAL, cx, cy, Inches(0.28), Inches(0.28))
-    c.fill.solid(); c.fill.fore_color.rgb = cc
-    c.line.fill.background()
-
-add_footer(s1, 1, W, H)
-add_fade_transition(s1)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 2 — Problem Statement & Motivation
-# ══════════════════════════════════════════════════════════════════════════════
-s2 = prs.slides.add_slide(blank)
-set_bg(s2, LIGHT_GRAY)
-add_title(s2, "Why HydroNet? The Flood Crisis in Chittagong", top=Inches(0.28))
-add_teal_underline(s2, Inches(0.92))
-
-# Left column
-left_lines = [
-    ("THE PROBLEM:", True),
-    ("Chittagong (pop. 8M+) sits at the confluence of the Karnaphuli River and the Bay of Bengal.", False),
-    ("Annual monsoon flooding has devastated the region repeatedly:", False),
-    ("• 2023 floods: 51+ lives lost, 1M+ people displaced", False),
-    ("• 2022: Major tidal surge damaged Chittagong Port, economic loss >$200M", False),
-    ("• Average annual flood damage: $500M across infrastructure", False),
-    ("• Current early warning: Manual observation, 30–60 min lead time only", False),
-    ("• Critical gap: No automated, real-time sensor network exists", False),
-    ("", False),
-    ("THE CONSEQUENCE:", True),
-    ("• Delayed evacuation = preventable casualties", False),
-    ("• First responders lack real-time situational awareness", False),
-    ("• Infrastructure damage compounds without advance warning", False),
-    ("• Vulnerable populations (coastal poor, river communities) most at risk", False),
-]
-
-tb_left = s2.shapes.add_textbox(Inches(0.4), Inches(1.05), Inches(5.3), Inches(4.3))
-tf_l = tb_left.text_frame; tf_l.word_wrap = True
-for i, (line, bold) in enumerate(left_lines):
-    if i == 0:
-        p = tf_l.paragraphs[0]
-    else:
-        p = tf_l.add_paragraph()
-    r = p.add_run()
-    r.text = line
-    r.font.size = Pt(9)
-    r.font.bold = bold
-    r.font.color.rgb = PRIMARY_BLUE if bold else DARK_SLATE
-    r.font.name = 'Calibri'
-
-# Right column: bar chart
-years  = [2019, 2020, 2021, 2022, 2023]
-deaths = [12, 18, 23, 35, 51]
-damage = [180, 220, 310, 410, 500]
-
-fig2, ax1 = plt.subplots(figsize=(4.2, 3.4))
-fig2.patch.set_facecolor('#f0f0f0')
-ax1.set_facecolor('#f8f8f8')
-bars = ax1.bar(years, deaths, color='#ff8c00', alpha=0.85, width=0.55, label='Deaths')
-ax1.set_ylabel('Deaths', color='#ff8c00', fontsize=8)
-ax1.tick_params(axis='y', labelcolor='#ff8c00', labelsize=7)
-ax1.set_xlabel('Year', fontsize=8)
-ax1.set_title('Flood Impact 2019–2023 (Chittagong)', fontsize=9, fontweight='bold', color='#1a3a6b')
-ax1.set_xticks(years); ax1.tick_params(axis='x', labelsize=7)
-ax2 = ax1.twinx()
-ax2.plot(years, damage, color='#1a3a6b', marker='o', linewidth=2, markersize=5, label='Damage $M')
-ax2.set_ylabel('Damage ($M)', color='#1a3a6b', fontsize=8)
-ax2.tick_params(axis='y', labelcolor='#1a3a6b', labelsize=7)
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc='upper left')
-fig2.tight_layout(pad=0.5)
-buf2 = fig_to_buf(fig2)
-s2.shapes.add_picture(buf2, Inches(5.8), Inches(1.05), Inches(3.9), Inches(3.4))
-
-add_footer(s2, 2, W, H)
-add_fade_transition(s2)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 3 — Solution Architecture Overview
-# ══════════════════════════════════════════════════════════════════════════════
-s3 = prs.slides.add_slide(blank)
-set_bg(s3, WHITE)
-add_title(s3, "HydroNet: System Architecture at a Glance", top=Inches(0.28))
-add_teal_underline(s3, Inches(0.92))
-
-fig3, ax3 = plt.subplots(figsize=(9.5, 3.3))
-fig3.patch.set_facecolor('white'); ax3.set_facecolor('white')
-ax3.set_xlim(0, 10); ax3.set_ylim(0, 3.3)
-ax3.axis('off')
-
-def draw_box(ax, cx, cy, w, h, label, facecolor, fontsize=7, textcolor='white'):
-    rect = FancyBboxPatch((cx - w/2, cy - h/2), w, h,
-                          boxstyle="round,pad=0.05", facecolor=facecolor,
-                          edgecolor='white', linewidth=0.8)
-    ax.add_patch(rect)
-    ax.text(cx, cy, label, ha='center', va='center',
-            fontsize=fontsize, color=textcolor, fontweight='bold', wrap=True)
-
-# Layer 1 – Monitoring
-layer1_y = 2.75
-for i, lbl in enumerate(["Zone-1\nRouter", "Zone-2\nRouter", "Zone-3\nRouter", "Zone-4\nRouter"]):
-    cx = 1.5 + i * 2.3
-    draw_box(ax3, cx, layer1_y, 1.7, 0.45, lbl, '#1a3a6b')
-ax3.text(0.1, layer1_y, "Monitoring\nLayer", fontsize=7, color='#1a3a6b', va='center', fontweight='bold')
-
-# Layer 2 – Core
-layer2_y = 1.85
-for i, lbl in enumerate(["Core-Switch-1", "Core-Switch-2", "Core-Router-1", "Core-Router-2"]):
-    cx = 1.8 + i * 2.0
-    draw_box(ax3, cx, layer2_y, 1.7, 0.42, lbl, '#00b4d8', textcolor='white')
-ax3.text(0.1, layer2_y, "Core\nNetwork", fontsize=7, color='#00b4d8', va='center', fontweight='bold')
-
-# ISP
-draw_box(ax3, 9.5, layer2_y, 0.9, 0.38, "ISP\nRouter", '#ff8c00')
-ax3.annotate('', xy=(8.05, layer2_y), xytext=(9.05, layer2_y),
-             arrowprops=dict(arrowstyle='->', color='#ff8c00', lw=1.5))
-
-# Layer 3 – Services
-layer3_y = 0.95
-for i, lbl in enumerate(["DHCP", "DNS", "WEB", "EMAIL", "MQTT"]):
-    cx = 1.4 + i * 1.8
-    draw_box(ax3, cx, layer3_y, 1.4, 0.38, lbl, '#2ea04e')
-ax3.text(0.1, layer3_y, "Services\nLayer", fontsize=7, color='#2ea04e', va='center', fontweight='bold')
-
-# Connecting lines L1→L2
-zone_xs = [1.5, 3.8, 6.1, 8.4]
-core_xs = [1.8, 3.8, 5.8, 7.8]
-for zx in zone_xs:
-    closest_cx = min(core_xs, key=lambda x: abs(x - zx))
-    ax3.annotate('', xy=(closest_cx, layer2_y + 0.21),
-                 xytext=(zx, layer1_y - 0.22),
-                 arrowprops=dict(arrowstyle='->', color='#aaaaaa', lw=0.8))
-
-# Connecting lines L2→L3
-for cx in core_xs:
-    ax3.annotate('', xy=(min(core_xs, key=lambda x: abs(x-cx)), layer3_y + 0.19),
-                 xytext=(cx, layer2_y - 0.21),
-                 arrowprops=dict(arrowstyle='->', color='#aaaaaa', lw=0.8))
-
-buf3 = fig_to_buf(fig3)
-s3.shapes.add_picture(buf3, Inches(0.15), Inches(1.0), Inches(9.7), Inches(3.35))
-
-# Bottom summary boxes
-box_defs = [
-    (Inches(0.3),  "20+ IoT Sensors | 4 Geographic Zones | Real-time 30s updates", RGBColor(0xff, 0xf0, 0xe0)),
-    (Inches(3.55), "OSPF Dynamic Routing | 12 VLANs | 5 Core Servers",              RGBColor(0xe0, 0xf7, 0xff)),
-    (Inches(6.8),  "NAT + ACL Security | DHCP/DNS/Web/Email | Early Warning Emails", RGBColor(0xf3, 0xec, 0xff)),
-]
-border_colors = [ORANGE, TEAL, PURPLE]
-for (bl, txt, bg), bc in zip(box_defs, border_colors):
-    bx = add_rect(s3, bl, Inches(4.42), Inches(3.05), Inches(0.82), bg, bc, 1.5)
-    tb_b = s3.shapes.add_textbox(bl + Inches(0.1), Inches(4.47), Inches(2.85), Inches(0.72))
-    tf_b = tb_b.text_frame; tf_b.word_wrap = True
-    pb = tf_b.paragraphs[0]
-    rb = pb.add_run(); rb.text = txt
-    rb.font.size = Pt(8.5); rb.font.color.rgb = DARK_SLATE; rb.font.name = 'Calibri'
-
-add_footer(s3, 3, W, H)
-add_fade_transition(s3)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 4 — Core Network Infrastructure
-# ══════════════════════════════════════════════════════════════════════════════
-s4 = prs.slides.add_slide(blank)
-set_bg(s4, LIGHT_GRAY)
-add_title(s4, "Core Network Infrastructure & IP Addressing", top=Inches(0.28))
-add_teal_underline(s4, Inches(0.9))
-
-fig4, ax4 = plt.subplots(figsize=(5.2, 3.9))
-fig4.patch.set_facecolor('#f0f0f0'); ax4.set_facecolor('#f5f5f5')
-ax4.set_xlim(0, 5.2); ax4.set_ylim(0, 3.9); ax4.axis('off')
-
-def dbox(ax, cx, cy, w, h, title, sub, fc, tc='white', fs=6.5):
-    r = FancyBboxPatch((cx-w/2, cy-h/2), w, h,
-                       boxstyle="round,pad=0.06", facecolor=fc, edgecolor='#888', linewidth=0.7)
-    ax.add_patch(r)
-    ax.text(cx, cy+0.06, title, ha='center', va='center',
-            fontsize=fs, color=tc, fontweight='bold')
-    if sub:
-        ax.text(cx, cy-0.14, sub, ha='center', va='center', fontsize=5.5, color=tc, alpha=0.9)
-
-# ISP
-dbox(ax4, 4.5, 3.4, 0.8, 0.32, "ISP Router", "172.16.0.1", '#e65c00')
-# Core Routers
-dbox(ax4, 1.3, 2.7, 1.3, 0.35, "Core-Router-1", "10.0.0.1/8", '#1a3a6b')
-dbox(ax4, 3.5, 2.7, 1.3, 0.35, "Core-Router-2", "10.0.0.2/8", '#1a3a6b')
-# Core Switches
-dbox(ax4, 1.3, 1.9, 1.3, 0.35, "Core-Switch-1", "10.0.0.10", '#00b4d8', 'white')
-dbox(ax4, 3.5, 1.9, 1.3, 0.35, "Core-Switch-2", "10.0.0.11", '#00b4d8', 'white')
-# Servers
-server_info = [
-    ("DHCP","10.0.100.1"), ("DNS","10.0.100.2"), ("WEB","10.0.100.3"),
-    ("EMAIL","10.0.100.4"), ("SYSLOG","10.0.100.5")
-]
-for i, (nm, ip) in enumerate(server_info):
-    cx4 = 0.55 + i * 0.95
-    dbox(ax4, cx4, 0.9, 0.85, 0.35, nm, ip, '#2ea04e', fs=6)
-
-# Connecting lines
-def line(ax, x1, y1, x2, y2, c='#888888', lw=1.2):
-    ax.plot([x1, x2], [y1, y2], '-', color=c, linewidth=lw)
-
-line(ax4, 4.5, 3.24, 3.5, 2.87)  # ISP → CR2
-line(ax4, 1.3, 2.52, 1.3, 2.07)  # CR1 ↓ CS1
-line(ax4, 3.5, 2.52, 3.5, 2.07)  # CR2 ↓ CS2
-line(ax4, 1.95, 2.7, 2.85, 2.7)  # CR1 — CR2
-line(ax4, 1.95, 1.9, 2.85, 1.9)  # CS1 — CS2
-for i in range(5):
-    cx4 = 0.55 + i * 0.95
-    line(ax4, cx4, 1.07, cx4, 1.72)
-
-buf4 = fig_to_buf(fig4)
-s4.shapes.add_picture(buf4, Inches(0.25), Inches(1.0), Inches(5.2), Inches(3.95))
-
-# Right text
-rt_lines = [
-    ("CORE DEVICES:", True, TEAL),
-    ("• Core-Router-1: Cisco 3945 | 10.0.0.1/8 | OSPF DR (priority 255)", False, DARK_SLATE),
-    ("• Core-Router-2: Cisco 3945 | 10.0.0.2/8 | OSPF BDR", False, DARK_SLATE),
-    ("• Core-Switch-1: Catalyst 3750-X | 10.0.0.10 | Layer-3 capable", False, DARK_SLATE),
-    ("• Core-Switch-2: Catalyst 3750-X | 10.0.0.11 | Redundant", False, DARK_SLATE),
-    ("", False, DARK_SLATE),
-    ("SERVER FARM (10.0.100.0/24):", True, TEAL),
-    ("• DHCP Server: 10.0.100.1 | Cisco Router | 4 zone pools", False, DARK_SLATE),
-    ("• DNS Server: 10.0.100.2 | BIND | hydronet.local", False, DARK_SLATE),
-    ("• Web Server: 10.0.100.3 | Apache | monitor.hydronet.local", False, DARK_SLATE),
-    ("• Email Server: 10.0.100.4 | SMTP:25 / POP3:110", False, DARK_SLATE),
-    ("• MQTT Broker: 10.0.100.1 | Port 1883 | QoS-2", False, DARK_SLATE),
-    ("", False, DARK_SLATE),
-    ("CONNECTIVITY:", True, TEAL),
-    ("• ISP Link: 172.16.0.0/30 | 100 Mbps", False, DARK_SLATE),
-    ("• Core Backbone: Gigabit Ethernet | Cost=1", False, DARK_SLATE),
-    ("• Zone Uplinks: FastEthernet | Cost=10", False, DARK_SLATE),
-]
-tb_rt = s4.shapes.add_textbox(Inches(5.65), Inches(1.05), Inches(4.1), Inches(4.2))
-tf_rt = tb_rt.text_frame; tf_rt.word_wrap = True
-for i, (txt, bold, col) in enumerate(rt_lines):
-    p = tf_rt.paragraphs[0] if i == 0 else tf_rt.add_paragraph()
-    r = p.add_run(); r.text = txt
-    r.font.size = Pt(8.5); r.font.bold = bold
-    r.font.color.rgb = col; r.font.name = 'Calibri'
-
-add_footer(s4, 4, W, H)
-add_fade_transition(s4)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 5 — Zone Network Topology
-# ══════════════════════════════════════════════════════════════════════════════
-s5 = prs.slides.add_slide(blank)
-set_bg(s5, WHITE)
-add_title(s5, "4-Zone Network Topology & Wireless Deployment", top=Inches(0.2))
-add_teal_underline(s5, Inches(0.82))
-
-fig5, ax5 = plt.subplots(figsize=(9.5, 4.2))
-fig5.patch.set_facecolor('white'); ax5.set_facecolor('white')
-ax5.set_xlim(0, 9.5); ax5.set_ylim(0, 4.2); ax5.axis('off')
-
-zone_cfg = [
-    ("Zone 1\nCoastal", 1.3, 3.5, '#ff8c00', '#fff0e0'),
-    ("Zone 2\nRiverine", 8.2, 3.5, '#00b4d8', '#e0f7ff'),
-    ("Zone 3\nHilly",   1.3, 0.9, '#7c3aed', '#f0e0ff'),
-    ("Zone 4\nUrban",   8.2, 0.9, '#2ea04e', '#e0ffe0'),
-]
-
-core_cx, core_cy = 4.75, 2.2
-# Core box
-core_rect = FancyBboxPatch((core_cx-1.2, core_cy-0.55), 2.4, 1.1,
-                           boxstyle="round,pad=0.08", facecolor='#1a3a6b',
-                           edgecolor='#00b4d8', linewidth=1.5)
-ax5.add_patch(core_rect)
-ax5.text(core_cx, core_cy+0.18, "CORE NETWORK", ha='center', va='center',
-         fontsize=8, color='white', fontweight='bold')
-ax5.text(core_cx, core_cy-0.12, "CR-1 • CR-2 • CS-1 • CS-2", ha='center', va='center',
-         fontsize=6.5, color='#00d4ff')
-
-for (zlbl, zx, zy, zcol, zbg) in zone_cfg:
-    # Zone panel
-    zpatch = FancyBboxPatch((zx-1.1, zy-0.75), 2.2, 1.5,
-                            boxstyle="round,pad=0.07", facecolor=zbg,
-                            edgecolor=zcol, linewidth=1.5)
-    ax5.add_patch(zpatch)
-    ax5.text(zx, zy+0.5, zlbl, ha='center', va='center',
-             fontsize=8, color=zcol, fontweight='bold')
-    # Sub-devices
-    for j, sub in enumerate(["ZR", "ZS", "AP"]):
-        sx = zx - 0.55 + j * 0.55
-        sy = zy + 0.05
-        sr = FancyBboxPatch((sx-0.2, sy-0.15), 0.4, 0.3,
-                            boxstyle="round,pad=0.03", facecolor=zcol, alpha=0.8,
-                            edgecolor='white', linewidth=0.5)
-        ax5.add_patch(sr)
-        ax5.text(sx, sy, sub, ha='center', va='center', fontsize=5.5, color='white', fontweight='bold')
-    # Sensor dots
-    for k in range(5):
-        sx2 = zx - 0.9 + k * 0.45
-        ax5.plot(sx2, zy - 0.5, 's', color=zcol, markersize=5, alpha=0.7)
-    ax5.text(zx, zy - 0.62, "5 Sensors", ha='center', va='center',
-             fontsize=5.5, color=zcol)
-
-    # Line to core
-    ax5.annotate('', xy=(core_cx + (0 if abs(zx-core_cx)<3 else (0.3 if zx>core_cx else -0.3)),
-                         core_cy + (0.35 if zy > core_cy else -0.35)),
-                 xytext=(zx + (0.6 if zx < core_cx else -0.6),
-                         zy + (-0.5 if zy > core_cy else 0.5)),
-                 arrowprops=dict(arrowstyle='<->', color=zcol, lw=1.4))
-
-# Legend
-legend_items = [
-    mpatches.Patch(color='#ff8c00', label='Zone 1 – Coastal Port'),
-    mpatches.Patch(color='#00b4d8', label='Zone 2 – Riverine Lowlands'),
-    mpatches.Patch(color='#7c3aed', label='Zone 3 – Hilly Upstream'),
-    mpatches.Patch(color='#2ea04e', label='Zone 4 – Urban Lowland'),
-    mpatches.Patch(color='#1a3a6b', label='Core Network'),
-]
-ax5.legend(handles=legend_items, loc='lower center', ncol=5,
-           fontsize=7, framealpha=0.9, bbox_to_anchor=(0.5, -0.01))
-
-buf5 = fig_to_buf(fig5)
-s5.shapes.add_picture(buf5, Inches(0.1), Inches(0.9), Inches(9.7), Inches(4.3))
-
-add_footer(s5, 5, W, H)
-add_fade_transition(s5)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 6 — VLAN Architecture
-# ══════════════════════════════════════════════════════════════════════════════
-s6 = prs.slides.add_slide(blank)
-set_bg(s6, LIGHT_GRAY)
-add_title(s6, "VLAN Segmentation: 12-VLAN Architecture", top=Inches(0.25))
-add_teal_underline(s6, Inches(0.88))
-
-vlans = [
-    (10,  "SENSORS-Z1",  "10.10.10.0/24",  "Zone-1 IoT Sensors"),
-    (20,  "SENSORS-Z2",  "10.10.20.0/24",  "Zone-2 IoT Sensors"),
-    (30,  "SENSORS-Z3",  "10.10.30.0/24",  "Zone-3 IoT Sensors"),
-    (40,  "SENSORS-Z4",  "10.10.40.0/24",  "Zone-4 IoT Sensors"),
-    (50,  "MANAGEMENT",  "10.0.50.0/24",   "Network Mgmt"),
-    (60,  "SERVERS",     "10.0.100.0/24",  "Server Farm"),
-    (70,  "WIRELESS-Z1", "10.20.10.0/24",  "Zone-1 Wireless"),
-    (80,  "WIRELESS-Z2", "10.20.20.0/24",  "Zone-2 Wireless"),
-    (90,  "WIRELESS-Z3", "10.20.30.0/24",  "Zone-3 Wireless"),
-    (100, "WIRELESS-Z4", "10.20.40.0/24",  "Zone-4 Wireless"),
-    (110, "CONTROL",     "10.0.110.0/24",  "Control Plane"),
-    (1,   "NATIVE",      "N/A",            "802.1Q Native VLAN"),
-]
-
-vlan_colors_map = {
-    10:'#1a3a6b',20:'#1a4a7b',30:'#1a5a8b',40:'#1a6a9b',
-    50:'#ff8c00',60:'#2ea04e',70:'#00b4d8',80:'#00c4e8',
-    90:'#00d4f8',100:'#7c3aed',110:'#9c5afd',1:'#888888'
-}
-
-fig6, ax6 = plt.subplots(figsize=(9.0, 2.0))
-fig6.patch.set_facecolor('#f0f0f0'); ax6.set_facecolor('#f0f0f0')
-ax6.set_xlim(0, 12); ax6.set_ylim(0, 2.0); ax6.axis('off')
-
-# Switch body
-sw = FancyBboxPatch((0.2, 0.5), 11.6, 1.0, boxstyle="round,pad=0.05",
-                    facecolor='#2d3d4f', edgecolor='#1a3a6b', linewidth=1.5)
-ax6.add_patch(sw)
-ax6.text(6.0, 1.0, "Core Switch — 12 VLANs  (802.1Q Trunk)", ha='center', va='center',
-         fontsize=7, color='white', fontweight='bold')
-
-band_w = 11.6 / 12
-for i, (vid, name, _, _) in enumerate(vlans):
-    bx = 0.2 + i * band_w
-    col = vlan_colors_map.get(vid, '#555555')
-    band = FancyBboxPatch((bx+0.04, 0.58), band_w-0.08, 0.84,
-                          boxstyle="round,pad=0.02", facecolor=col, alpha=0.85,
-                          edgecolor='white', linewidth=0.5)
-    ax6.add_patch(band)
-    ax6.text(bx + band_w/2, 1.12, str(vid), ha='center', va='center',
-             fontsize=6.5, color='white', fontweight='bold')
-    ax6.text(bx + band_w/2, 0.78, name[:8], ha='center', va='center',
-             fontsize=5, color='white', rotation=0)
-
-buf6 = fig_to_buf(fig6)
-s6.shapes.add_picture(buf6, Inches(0.3), Inches(1.0), Inches(9.4), Inches(1.9))
-
-# Two-column VLAN table
-col_headers = ["VLAN", "Name", "Subnet", "Purpose"]
-hdr_txt = "  ".join(f"{h:<13}" for h in col_headers)
-
-tb6L = s6.shapes.add_textbox(Inches(0.3), Inches(3.0), Inches(4.6), Inches(2.3))
-tf6L = tb6L.text_frame; tf6L.word_wrap = False
-p6h = tf6L.paragraphs[0]
-rh = p6h.add_run()
-rh.text = f"{'ID':<5}{'Name':<14}{'Subnet':<17}{'Purpose'}"
-rh.font.size = Pt(7.5); rh.font.bold = True; rh.font.color.rgb = PRIMARY_BLUE
-
-for vid, name, subnet, purpose in vlans[:6]:
-    p = tf6L.add_paragraph()
-    r = p.add_run()
-    r.text = f"{vid:<5}{name:<14}{subnet:<17}{purpose}"
-    r.font.size = Pt(7.5); r.font.color.rgb = DARK_SLATE; r.font.name = 'Courier New'
-
-tb6R = s6.shapes.add_textbox(Inches(5.1), Inches(3.0), Inches(4.6), Inches(2.3))
-tf6R = tb6R.text_frame; tf6R.word_wrap = False
-p6h2 = tf6R.paragraphs[0]
-rh2 = p6h2.add_run()
-rh2.text = f"{'ID':<5}{'Name':<14}{'Subnet':<17}{'Purpose'}"
-rh2.font.size = Pt(7.5); rh2.font.bold = True; rh2.font.color.rgb = PRIMARY_BLUE
-
-for vid, name, subnet, purpose in vlans[6:]:
-    p = tf6R.add_paragraph()
-    r = p.add_run()
-    r.text = f"{vid:<5}{name:<14}{subnet:<17}{purpose}"
-    r.font.size = Pt(7.5); r.font.color.rgb = DARK_SLATE; r.font.name = 'Courier New'
-
-# Note
-add_textbox(s6, "802.1Q trunking on all uplinks  |  Inter-VLAN routing via ACL  |  VLAN 100 reachable from all zones",
-            Inches(0.3), Inches(5.18), Inches(9.4), Inches(0.28),
-            font_size=8, italic=True, color=PRIMARY_BLUE, align=PP_ALIGN.CENTER)
-
-add_footer(s6, 6, W, H)
-add_fade_transition(s6)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 7 — Server Infrastructure & Services
-# ══════════════════════════════════════════════════════════════════════════════
-s7 = prs.slides.add_slide(blank)
-set_bg(s7, WHITE)
-add_title(s7, "Centralized Services: DHCP, DNS, Web & Email", top=Inches(0.25))
-add_teal_underline(s7, Inches(0.88))
-
-cards = [
-    ("DHCP Server", "10.0.100.1",
-     ["• Cisco Router-based DHCP",
-      "• Zone-1 Pool: 10.10.10.10–254",
-      "• Zone-2 Pool: 10.10.20.10–254",
-      "• Zone-3 Pool: 10.10.30.10–254",
-      "• Zone-4 Pool: 10.10.40.10–254",
-      "• Lease time: 24 hours",
-      "• DNS: 10.0.100.2 pushed",
-      "• Default GW per zone"],
-     RGBColor(0xff, 0xf0, 0xe0), ORANGE),
-    ("DNS Server", "10.0.100.2",
-     ["• BIND 9 – hydronet.local",
-      "• A: monitor → 10.0.100.3",
-      "• A: mail → 10.0.100.4",
-      "• A: dhcp → 10.0.100.1",
-      "• A: syslog → 10.0.100.5",
-      "• Forwarder: 8.8.8.8",
-      "• Zone: hydronet.local",
-      "• Reverse DNS configured"],
-     RGBColor(0xe0, 0xf7, 0xff), TEAL),
-    ("Web Server", "10.0.100.3",
-     ["• Apache HTTP 2.4",
-      "• URL: monitor.hydronet.local",
-      "• Dashboard: real-time data",
-      "• Port 80 (HTTP)",
-      "• Sensor data via MQTT",
-      "• Charts: water level & flow",
-      "• Alert banner on threshold",
-      "• Accessible all VLANs"],
-     RGBColor(0xf3, 0xec, 0xff), PURPLE),
-    ("Email Server", "10.0.100.4",
-     ["• Postfix SMTP – Port 25",
-      "• Dovecot POP3 – Port 110",
-      "• Domain: hydronet.local",
-      "• Alerts → admin@hydronet",
-      "• Flood threshold email",
-      "• Zone status digest",
-      "• SMTP auth required",
-      "• Log: /var/log/mail.log"],
-     RGBColor(0xe6, 0xff, 0xe6), GREEN_ACCENT),
-]
-
-card_w = Inches(2.3)
-card_h = Inches(3.8)
-for i, (title, ip, lines, bg, border) in enumerate(cards):
-    cl = Inches(0.3 + i * 2.38)
-    ct = Inches(1.0)
-    add_rect(s7, cl, ct, card_w, card_h, bg, border, 1.5)
-    # Card title bar
-    add_rect(s7, cl, ct, card_w, Inches(0.42), border)
-    tb_ct = s7.shapes.add_textbox(cl + Inches(0.05), ct + Inches(0.03),
-                                   card_w - Inches(0.1), Inches(0.38))
-    tf_ct = tb_ct.text_frame; p_ct = tf_ct.paragraphs[0]
-    p_ct.alignment = PP_ALIGN.CENTER
-    r_ct = p_ct.add_run(); r_ct.text = title
-    r_ct.font.size = Pt(10); r_ct.font.bold = True
-    r_ct.font.color.rgb = WHITE; r_ct.font.name = 'Calibri'
-    # IP
-    tb_ip = s7.shapes.add_textbox(cl + Inches(0.05), ct + Inches(0.44),
-                                   card_w - Inches(0.1), Inches(0.25))
-    tf_ip = tb_ip.text_frame; p_ip = tf_ip.paragraphs[0]
-    p_ip.alignment = PP_ALIGN.CENTER
-    r_ip = p_ip.add_run(); r_ip.text = ip
-    r_ip.font.size = Pt(8.5); r_ip.font.bold = True
-    r_ip.font.color.rgb = border; r_ip.font.name = 'Courier New'
-    # Lines
-    tb_li = s7.shapes.add_textbox(cl + Inches(0.1), ct + Inches(0.75),
-                                   card_w - Inches(0.15), Inches(2.9))
-    tf_li = tb_li.text_frame; tf_li.word_wrap = True
-    for j, ln in enumerate(lines):
-        p2 = tf_li.paragraphs[0] if j == 0 else tf_li.add_paragraph()
-        r2 = p2.add_run(); r2.text = ln
-        r2.font.size = Pt(8); r2.font.color.rgb = DARK_SLATE; r2.font.name = 'Calibri'
-
-# Bottom note
-add_rect(s7, Inches(0.3), Inches(4.95), Inches(9.4), Inches(0.35),
-         RGBColor(0xe8, 0xf4, 0xff), TEAL, 1)
-add_textbox(s7, "All services tested and verified in Cisco Packet Tracer 8.2.2",
-            Inches(0.4), Inches(4.98), Inches(9.2), Inches(0.28),
-            font_size=9, italic=True, color=PRIMARY_BLUE, align=PP_ALIGN.CENTER)
-
-add_footer(s7, 7, W, H)
-add_fade_transition(s7)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 8 — 4 Zones Overview (2×2 Grid)
-# ══════════════════════════════════════════════════════════════════════════════
-s8 = prs.slides.add_slide(blank)
-set_bg(s8, LIGHT_GRAY)
-add_title(s8, "Zone Architecture: 4 Strategic Monitoring Locations", top=Inches(0.22))
-add_teal_underline(s8, Inches(0.85))
-
-zones_data = [
-    ("Zone 1: Coastal Port Area",
-     RGBColor(0xff, 0xf0, 0xe6), ORANGE,
-     ["Router: Zone1-Router (Cisco 2901) | 10.10.10.1",
-      "Switch: Zone1-Switch (Catalyst 2960-X)",
-      "AP: Zone1-AP (Cisco Aironet 1840)",
-      "Sensors (5): Water Level, Tidal Gauge,",
-      "  Rain Gauge, Salinity, Current Meter",
-      "VLAN: 10 (Sensors), 70 (Wireless)",
-      "Coverage: Port district, coastal belt"]),
-    ("Zone 2: Riverine Lowlands",
-     RGBColor(0xe6, 0xf7, 0xff), TEAL,
-     ["Router: Zone2-Router (Cisco 2901) | 10.10.20.1",
-      "Switch: Zone2-Switch (Catalyst 2960-X)",
-      "AP: Zone2-AP (Cisco Aironet 1840)",
-      "Sensors (5): Water Level, Flow Velocity,",
-      "  Turbidity, Soil Moisture, Rain Gauge",
-      "VLAN: 20 (Sensors), 80 (Wireless)",
-      "Coverage: Karnaphuli floodplains"]),
-    ("Zone 3: Hilly Upstream",
-     RGBColor(0xf0, 0xe6, 0xff), PURPLE,
-     ["Router: Zone3-Router (Cisco 2901) | 10.10.30.1",
-      "Switch: Zone3-Switch (Catalyst 2960-X)",
-      "AP: Zone3-AP (Cisco Aironet 1840)",
-      "Sensors (5): Water Level, Flow Rate,",
-      "  Landslide, Rain Gauge, Temperature",
-      "VLAN: 30 (Sensors), 90 (Wireless)",
-      "Coverage: Sitakund hills, upstream catchment"]),
-    ("Zone 4: Urban Lowland",
-     RGBColor(0xe6, 0xff, 0xe6), GREEN_ACCENT,
-     ["Router: Zone4-Router (Cisco 2901) | 10.10.40.1",
-      "Switch: Zone4-Switch (Catalyst 2960-X)",
-      "AP: Zone4-AP (Cisco Aironet 1840)",
-      "Sensors (5): Street Flood, Stormwater,",
-      "  Rain Gauge, Humidity, Water Quality",
-      "VLAN: 40 (Sensors), 100 (Wireless)",
-      "Coverage: GEC, Agrabad, Nasirabad"]),
-]
-
-positions = [(0, 0), (1, 0), (0, 1), (1, 1)]
-qw = Inches(4.75); qh = Inches(1.95)
-for (col, row), (zname, zbg, zborder, zlines) in zip(positions, zones_data):
-    ql = Inches(0.2 + col * 4.85)
-    qt = Inches(1.0 + row * 2.05)
-    add_rect(s8, ql, qt, qw, qh, zbg, zborder, 1.8)
-    # Title bar
-    add_rect(s8, ql, qt, qw, Inches(0.32), zborder)
-    tb_zt = s8.shapes.add_textbox(ql + Inches(0.08), qt + Inches(0.03),
-                                   qw - Inches(0.1), Inches(0.28))
-    tf_zt = tb_zt.text_frame; p_zt = tf_zt.paragraphs[0]
-    r_zt = p_zt.add_run(); r_zt.text = zname
-    r_zt.font.size = Pt(9); r_zt.font.bold = True
-    r_zt.font.color.rgb = WHITE; r_zt.font.name = 'Calibri'
-    # Content
-    tb_zc = s8.shapes.add_textbox(ql + Inches(0.08), qt + Inches(0.36),
-                                   qw - Inches(0.1), Inches(1.52))
-    tf_zc = tb_zc.text_frame; tf_zc.word_wrap = True
-    for j, zl in enumerate(zlines):
-        p2 = tf_zc.paragraphs[0] if j == 0 else tf_zc.add_paragraph()
-        r2 = p2.add_run(); r2.text = zl
-        r2.font.size = Pt(7.5); r2.font.color.rgb = DARK_SLATE; r2.font.name = 'Calibri'
-
-# Legend strip
-legend_strip = add_rect(s8, Inches(0.2), Inches(5.08), Inches(9.6), Inches(0.28),
-                        RGBColor(0xe0, 0xe0, 0xe0))
-legend_items_txt = [
-    ("■ Water Level", TEAL), ("■ Rain Gauge", PRIMARY_BLUE),
-    ("■ Tidal/Flow", ORANGE), ("■ Soil/Landslide", PURPLE),
-    ("■ AP Wireless", GREEN_ACCENT)
-]
-leg_l = Inches(0.4)
-for txt, col in legend_items_txt:
-    tb_lg = s8.shapes.add_textbox(leg_l, Inches(5.1), Inches(1.8), Inches(0.25))
-    tf_lg = tb_lg.text_frame
-    r_lg = tf_lg.paragraphs[0].add_run(); r_lg.text = txt
-    r_lg.font.size = Pt(7.5); r_lg.font.color.rgb = col
-    leg_l += Inches(1.85)
-
-add_footer(s8, 8, W, H)
-add_fade_transition(s8)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 9 — IoT Devices & Sensor Integration
-# ══════════════════════════════════════════════════════════════════════════════
-s9 = prs.slides.add_slide(blank)
-set_bg(s9, WHITE)
-add_title(s9, "IoT Sensor Deployment & Device Specifications", top=Inches(0.25))
-add_teal_underline(s9, Inches(0.88))
-
-sensor_specs = [
-    ("Water Level Sensor",    "Ultrasonic + Pressure", "±2mm accuracy", "MQTT/TCP, 30s interval", "10.10.x.10-30"),
-    ("Rain Gauge",            "Tipping bucket 0.2mm",  "±5% accuracy",  "MQTT/UDP, 60s interval", "10.10.x.31-50"),
-    ("Flow Velocity Meter",   "Acoustic Doppler",      "0.001–10 m/s",  "MQTT/TCP, 30s interval", "10.10.x.51-70"),
-    ("Soil Moisture Sensor",  "Capacitive probe",      "±3% VWC",       "MQTT/UDP, 120s interval","10.10.x.71-90"),
-    ("Tidal Gauge",           "Pressure transducer",   "±1cm accuracy", "MQTT/TCP, 15s interval", "10.10.x.91-110"),
-    ("Water Quality Probe",   "Multi-parameter",       "pH/Turbid/Cond","MQTT/TCP, 60s interval", "10.10.x.111-130"),
-]
-
-tb9 = s9.shapes.add_textbox(Inches(0.3), Inches(1.05), Inches(5.8), Inches(4.2))
-tf9 = tb9.text_frame; tf9.word_wrap = True
-p9h = tf9.paragraphs[0]
-rh9 = p9h.add_run()
-rh9.text = "SENSOR SPECIFICATIONS:"
-rh9.font.size = Pt(9.5); rh9.font.bold = True; rh9.font.color.rgb = TEAL
-
-for sname, stype, saccuracy, sprotocol, sip in sensor_specs:
-    p9 = tf9.add_paragraph()
-    r9 = p9.add_run()
-    r9.text = f"▶ {sname}"
-    r9.font.size = Pt(9); r9.font.bold = True; r9.font.color.rgb = PRIMARY_BLUE
-
-    for detail in [f"  Type: {stype}", f"  Accuracy: {saccuracy}",
-                   f"  Protocol: {sprotocol}", f"  IP Range: {sip}"]:
-        pd = tf9.add_paragraph()
-        rd = pd.add_run(); rd.text = detail
-        rd.font.size = Pt(7.5); rd.font.color.rgb = DARK_SLATE; rd.font.name = 'Calibri'
-
-    tf9.add_paragraph()
-
-# Device count + protocol stack
-add_rect(s9, Inches(0.3), Inches(4.7), Inches(5.8), Inches(0.55),
-         RGBColor(0xe8, 0xf4, 0xff), TEAL, 1)
-tb9b = s9.shapes.add_textbox(Inches(0.4), Inches(4.72), Inches(5.6), Inches(0.5))
-tf9b = tb9b.text_frame; p9b = tf9b.paragraphs[0]
-r9b = p9b.add_run()
-r9b.text = "Devices: 20 sensors × 4 zones = 80 total  |  Protocol: MQTT over Wi-Fi (802.11n)  |  QoS Level 2"
-r9b.font.size = Pt(8); r9b.font.bold = True; r9b.font.color.rgb = PRIMARY_BLUE
-
-# Right: map diagram
-fig9, ax9 = plt.subplots(figsize=(3.8, 4.0))
-fig9.patch.set_facecolor('white'); ax9.set_facecolor('#e8f4ff')
-ax9.set_xlim(0, 4); ax9.set_ylim(0, 4.5)
-ax9.set_title("Chittagong Sensor Deployment", fontsize=8, fontweight='bold', color='#1a3a6b')
-ax9.set_xticks([]); ax9.set_yticks([])
-
-# Simplified map: Bay of Bengal area
-bay = Polygon([[2.5, 0], [4, 0], [4, 2.5], [3, 2]],
-              closed=True, color='#a8d8ea', alpha=0.5)
-ax9.add_patch(bay)
-ax9.text(3.2, 0.8, "Bay of\nBengal", ha='center', fontsize=7, color='#1a3a6b', alpha=0.8)
-
-river = Polygon([[1.5, 0.5], [2.5, 0.5], [3.0, 2.0], [2.5, 2.5], [2.0, 2.0], [1.0, 1.5]],
-                closed=True, color='#90caf9', alpha=0.6)
-ax9.add_patch(river)
-ax9.text(1.9, 1.3, "Karnaphuli\nRiver", ha='center', fontsize=6.5, color='#1a3a6b')
-
-zone_map = [
-    ("Z1\nCoastal", 2.7, 1.2, '#ff8c00'),
-    ("Z2\nRiverine", 1.8, 2.0, '#00b4d8'),
-    ("Z3\nHilly",   0.7, 3.5, '#7c3aed'),
-    ("Z4\nUrban",   1.5, 3.2, '#2ea04e'),
-]
-for zlbl9, zx9, zy9, zcol9 in zone_map:
-    circ9 = Circle((zx9, zy9), 0.45, color=zcol9, alpha=0.2)
-    ax9.add_patch(circ9)
-    ax9.plot(zx9, zy9, 'o', color=zcol9, markersize=12, alpha=0.85)
-    ax9.text(zx9, zy9, zlbl9, ha='center', va='center',
-             fontsize=6, color='white', fontweight='bold')
-    for s in range(5):
-        angle9 = s * 72 * np.pi / 180
-        sx9 = zx9 + 0.35 * np.cos(angle9)
-        sy9 = zy9 + 0.35 * np.sin(angle9)
-        ax9.plot(sx9, sy9, '^', color=zcol9, markersize=4)
-
-leg9 = [mpatches.Patch(color=c, label=l) for l, _, _, c in zone_map]
-ax9.legend(handles=leg9, fontsize=6, loc='lower left', framealpha=0.9)
-
-buf9 = fig_to_buf(fig9)
-s9.shapes.add_picture(buf9, Inches(6.2), Inches(0.95), Inches(3.55), Inches(3.85))
-
-add_footer(s9, 9, W, H)
-add_fade_transition(s9)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 10 — OSPF Routing & Security Architecture
-# ══════════════════════════════════════════════════════════════════════════════
-s10 = prs.slides.add_slide(blank)
-set_bg(s10, LIGHT_GRAY)
-add_title(s10, "Dynamic Routing (OSPF) and Security Implementation", top=Inches(0.22))
-add_teal_underline(s10, Inches(0.85))
-
-# OSPF diagram
-fig10, ax10 = plt.subplots(figsize=(9.0, 2.3))
-fig10.patch.set_facecolor('#f0f0f0'); ax10.set_facecolor('#f5f5f5')
-ax10.set_xlim(0, 9); ax10.set_ylim(0, 2.3); ax10.axis('off')
-
-# Center hexagon (backbone)
-from matplotlib.patches import RegularPolygon
-hex10 = RegularPolygon((4.5, 1.15), numVertices=6, radius=0.7,
-                       orientation=0, facecolor='#1a3a6b', edgecolor='#00b4d8', linewidth=2)
-ax10.add_patch(hex10)
-ax10.text(4.5, 1.22, "OSPF Area 0", ha='center', va='center', fontsize=7.5,
-          color='white', fontweight='bold')
-ax10.text(4.5, 0.92, "(Backbone)", ha='center', va='center', fontsize=6.5, color='#00d4ff')
-
-ospf_areas = [
-    ("Area 1\nZone 1", 1.2, 1.9, '#ff8c00', "10.10.10.0/24"),
-    ("Area 2\nZone 2", 7.8, 1.9, '#00b4d8', "10.10.20.0/24"),
-    ("Area 3\nZone 3", 1.2, 0.4, '#7c3aed', "10.10.30.0/24"),
-    ("Area 4\nZone 4", 7.8, 0.4, '#2ea04e', "10.10.40.0/24"),
-]
-for (albl, ax_, ay_, acol, anet) in ospf_areas:
-    arect = FancyBboxPatch((ax_-0.7, ay_-0.28), 1.4, 0.56,
-                           boxstyle="round,pad=0.05", facecolor=acol, alpha=0.85,
-                           edgecolor='white', linewidth=0.8)
-    ax10.add_patch(arect)
-    ax10.text(ax_, ay_+0.06, albl, ha='center', va='center',
-              fontsize=6.5, color='white', fontweight='bold')
-    ax10.text(ax_, ay_-0.16, anet, ha='center', va='center', fontsize=5.5, color='white')
-    dx = 4.5 - ax_; dy = 1.15 - ay_
-    length = (dx**2 + dy**2)**0.5
-    ax10.annotate('', xy=(ax_ + dx/length*0.72, ay_ + dy/length*0.28),
-                  xytext=(ax_, ay_),
-                  arrowprops=dict(arrowstyle='->', color=acol, lw=1.3))
-
-# ISP
-isp10 = FancyBboxPatch((4.0, 1.95), 1.0, 0.32,
-                       boxstyle="round,pad=0.04", facecolor='#e65c00',
-                       edgecolor='white', linewidth=0.8)
-ax10.add_patch(isp10)
-ax10.text(4.5, 2.11, "ISP / Internet", ha='center', va='center',
-          fontsize=6.5, color='white', fontweight='bold')
-ax10.annotate('', xy=(4.5, 1.85), xytext=(4.5, 1.97),
-             arrowprops=dict(arrowstyle='<->', color='#e65c00', lw=1.3))
-
-ax10.text(4.5, 0.05, "OSPF Hello: 10s | Dead: 40s | Process-ID: 1 | Router-ID auto | SPF runs on topology change",
-          ha='center', va='center', fontsize=6, color='#555555', style='italic')
-
-buf10 = fig_to_buf(fig10)
-s10.shapes.add_picture(buf10, Inches(0.2), Inches(1.0), Inches(9.5), Inches(2.35))
-
-# Lower half: three columns
-lower_data = [
-    ("NAT Configuration", ORANGE, [
-        "ip nat inside source list 1",
-        "  interface GigEth0/0 overload",
-        "access-list 1 permit",
-        "  10.0.0.0 0.255.255.255",
-        "• PAT (overload) for all zones",
-        "• Inside: all VLANs",
-        "• Outside: ISP interface",
-        "• Static NAT: Web server",
-        "  10.0.100.3 → 172.16.0.10",
-    ]),
-    ("ACL Security Rules", TEAL, [
-        "ACL 100 – Inbound ISP:",
-        "  permit tcp any host 172.16.0.10 eq 80",
-        "  permit tcp any host 172.16.0.10 eq 443",
-        "  deny   ip any 10.0.50.0 0.0.0.255",
-        "  deny   ip any 10.0.110.0 0.0.0.255",
-        "ACL 101 – Zone isolation:",
-        "  permit tcp 10.10.x.0 host 10.0.100.x",
-        "  deny   ip 10.10.x.0 10.10.y.0",
-        "  permit ip any 10.0.100.0 0.0.0.255",
-    ]),
-    ("Security Zones", PURPLE, [
-        "DMZ: Web + Email servers",
-        "  → Accessible from internet",
-        "Internal: DHCP + DNS + MQTT",
-        "  → No direct internet",
-        "Management: VLAN 50",
-        "  → Admin access only",
-        "Sensor VLANs 10–40:",
-        "  → MQTT only to broker",
-        "  → No cross-zone traffic",
-    ]),
-]
-
-col_w = Inches(3.05)
-for ci, (ctitle, ccol, clines) in enumerate(lower_data):
-    cl = Inches(0.3 + ci * 3.2)
-    ct = Inches(3.42)
-    add_rect(s10, cl, ct, col_w, Inches(1.88), RGBColor(0xff, 0xff, 0xff), ccol, 1)
-    # col header
-    add_rect(s10, cl, ct, col_w, Inches(0.28), ccol)
-    tb_ch = s10.shapes.add_textbox(cl + Inches(0.05), ct + Inches(0.03),
-                                    col_w - Inches(0.1), Inches(0.24))
-    p_ch = tb_ch.text_frame.paragraphs[0]
-    r_ch = p_ch.add_run(); r_ch.text = ctitle
-    r_ch.font.size = Pt(8.5); r_ch.font.bold = True
-    r_ch.font.color.rgb = WHITE
-
-    tb_cl = s10.shapes.add_textbox(cl + Inches(0.08), ct + Inches(0.32),
-                                    col_w - Inches(0.12), Inches(1.5))
-    tf_cl = tb_cl.text_frame; tf_cl.word_wrap = True
-    for j, ln in enumerate(clines):
-        p2 = tf_cl.paragraphs[0] if j == 0 else tf_cl.add_paragraph()
-        r2 = p2.add_run(); r2.text = ln
-        r2.font.size = Pt(7); r2.font.color.rgb = DARK_SLATE
-        r2.font.name = 'Courier New' if 'permit' in ln or 'deny' in ln or 'ip nat' in ln else 'Calibri'
-
-add_footer(s10, 10, W, H)
-add_fade_transition(s10)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 11 — Key Technical Highlights
-# ══════════════════════════════════════════════════════════════════════════════
-s11 = prs.slides.add_slide(blank)
-set_bg(s11, WHITE)
-add_title(s11, "Implementation Highlights: What We Configured", top=Inches(0.25))
-add_teal_underline(s11, Inches(0.88))
-
-highlight_cards = [
-    ("VLAN Segmentation", RGBColor(0xff, 0xf0, 0xe0), ORANGE,
-     ["12 VLANs configured on all switches",
-      "802.1Q trunk links between all switches and routers",
-      "Inter-VLAN routing via Layer-3 switch",
-      "VLAN 50 (Mgmt) isolated with ACL",
-      "Native VLAN 1 – untagged frames only"]),
-    ("DHCP Services", RGBColor(0xe0, 0xf7, 0xff), TEAL,
-     ["4 DHCP pools: one per zone VLAN",
-      "Excluded addresses: .1–.9 per pool",
-      "DNS option: 10.0.100.2 pushed",
-      "Default gateway: zone router IP",
-      "Lease: 24h; tested across VLANs"]),
-    ("DNS & Web Monitoring", RGBColor(0xf3, 0xec, 0xff), PURPLE,
-     ["BIND DNS: hydronet.local zone",
-      "A records for all servers resolved",
-      "Apache web: monitor.hydronet.local",
-      "Real-time sensor dashboard page",
-      "HTTP tested from all zone hosts"]),
-    ("Email & Alert System", RGBColor(0xe6, 0xff, 0xe6), GREEN_ACCENT,
-     ["SMTP server: port 25 configured",
-      "POP3: port 110 for retrieval",
-      "Alert emails on flood threshold",
-      "Recipients: admin + zone officers",
-      "Tested: email received in PT sim"]),
-    ("OSPF Dynamic Routing", RGBColor(0xf0, 0xf0, 0xf0), DARK_SLATE,
-     ["Single Area 0 (backbone) design",
-      "OSPF enabled on all routers",
-      "Priority 255 on Core-Router-1 (DR)",
-      "All zone subnets redistributed",
-      "Convergence tested: <5 seconds"]),
-    ("Security (NAT + ACL)", RGBColor(0xff, 0xee, 0xee), ORANGE_ALERT,
-     ["PAT (overload) on ISP interface",
-      "Static NAT for web server access",
-      "ACL 100: filters ISP inbound",
-      "ACL 101: zone-to-zone isolation",
-      "Management VLAN: admin-only ACL"]),
-]
-
-card_w11 = Inches(2.98); card_h11 = Inches(1.8)
-for i, (ctitle, cbg, cborder, clines) in enumerate(highlight_cards):
-    col = i % 3; row = i // 3
-    cl = Inches(0.3 + col * 3.15)
-    ct = Inches(1.0 + row * 1.95)
-    add_rect(s11, cl, ct, card_w11, card_h11, cbg, cborder, 1.5)
-    add_rect(s11, cl, ct, card_w11, Inches(0.32), cborder)
-    tb_h = s11.shapes.add_textbox(cl + Inches(0.08), ct + Inches(0.04),
-                                   card_w11 - Inches(0.1), Inches(0.25))
-    p_h = tb_h.text_frame.paragraphs[0]
-    r_h = p_h.add_run(); r_h.text = ctitle
-    r_h.font.size = Pt(9); r_h.font.bold = True
-    r_h.font.color.rgb = WHITE; r_h.font.name = 'Calibri'
-
-    tb_c = s11.shapes.add_textbox(cl + Inches(0.1), ct + Inches(0.38),
-                                   card_w11 - Inches(0.15), Inches(1.35))
-    tf_c = tb_c.text_frame; tf_c.word_wrap = True
-    for j, ln in enumerate(clines):
-        p2 = tf_c.paragraphs[0] if j == 0 else tf_c.add_paragraph()
-        r2 = p2.add_run(); r2.text = "• " + ln
-        r2.font.size = Pt(7.5); r2.font.color.rgb = DARK_SLATE; r2.font.name = 'Calibri'
-
-# Bottom summary box
-add_rect(s11, Inches(0.3), Inches(4.92), Inches(9.4), Inches(0.38),
-         RGBColor(0xe0, 0xf7, 0xff), TEAL, 1)
-add_textbox(s11,
-    "Complete end-to-end network deployed in Cisco Packet Tracer 8.2.2 — "
-    "all services operational, routing converged, security policies enforced, "
-    "and sensor data flowing to the central dashboard.",
-    Inches(0.4), Inches(4.95), Inches(9.2), Inches(0.33),
-    font_size=8, italic=True, color=PRIMARY_BLUE, align=PP_ALIGN.CENTER)
-
-add_footer(s11, 11, W, H)
-add_fade_transition(s11)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 12 — Limitations & Future Directions
-# ══════════════════════════════════════════════════════════════════════════════
-s12 = prs.slides.add_slide(blank)
-set_bg(s12, WHITE)
-add_title(s12, "Limitations of Current Implementation & Future Roadmap", top=Inches(0.22))
-add_teal_underline(s12, Inches(0.85))
-
-limitations = [
-    ("Simulation Environment",
-     ["Cisco Packet Tracer lacks full IoT physics",
-      "Real sensor latency not modeled",
-      "No packet loss or interference simulation"]),
-    ("Physical Layer",
-     ["No real cable/wireless deployment",
-      "Power supply and PoE not considered",
-      "Environmental sensor enclosures absent"]),
-    ("Security Depth",
-     ["No VPN or encryption (HTTPS/TLS)",
-      "No intrusion detection system (IDS)",
-      "Password policies not fully enforced"]),
-    ("Scalability",
-     ["Current design supports 4 zones only",
-      "Adding zones needs full redesign",
-      "No load balancing on core routers"]),
-    ("Redundancy",
-     ["No HSRP/VRRP for gateway failover",
-      "Single ISP uplink — no redundancy",
-      "Spanning Tree not fully optimized"]),
-    ("Data Analytics",
-     ["No ML-based flood prediction",
-      "No historical data storage (no DB)",
-      "Alert thresholds are static values"]),
-]
-
-roadmap = [
-    ("Phase 1 (0–6 mo): Deployment",
-     ["Physical sensor procurement & install",
-      "Fiber backbone for core links",
-      "PoE switches for sensor power"]),
-    ("Phase 2 (6–12 mo): Security",
-     ["TLS encryption on MQTT",
-      "VPN tunnels for remote zones",
-      "Implement IDS/IPS (Snort)"]),
-    ("Phase 3 (12–18 mo): Redundancy",
-     ["HSRP on all zone gateways",
-      "Dual ISP with BGP failover",
-      "UPS & solar backup for sensors"]),
-    ("Phase 4 (18–24 mo): Intelligence",
-     ["ML flood prediction model",
-      "Time-series DB (InfluxDB)",
-      "Dynamic alert thresholds"]),
-    ("Phase 5 (24–30 mo): Scale",
-     ["Expand to 12 zones city-wide",
-      "Mobile app for public alerts",
-      "API for govt. disaster portal"]),
-    ("Phase 6 (30–36 mo): Integration",
-     ["Integrate Bangladesh Met. Dept.",
-      "Cross-border data sharing",
-      "ISO/IEC 27001 certification"]),
-]
-
-add_rect(s12, Inches(0.2), Inches(1.0), Inches(4.65), Inches(3.85),
-         RGBColor(0xff, 0xf5, 0xf5), ORANGE_ALERT, 1.2)
-add_rect(s12, Inches(0.2), Inches(1.0), Inches(4.65), Inches(0.3), ORANGE_ALERT)
-tb_lh = s12.shapes.add_textbox(Inches(0.3), Inches(1.02), Inches(4.45), Inches(0.26))
-p_lh = tb_lh.text_frame.paragraphs[0]
-r_lh = p_lh.add_run(); r_lh.text = "⚠  Current Limitations"
-r_lh.font.size = Pt(10); r_lh.font.bold = True; r_lh.font.color.rgb = WHITE
-
-tb_lim = s12.shapes.add_textbox(Inches(0.3), Inches(1.35), Inches(4.45), Inches(3.45))
-tf_lim = tb_lim.text_frame; tf_lim.word_wrap = True
-first = True
-for cat, items in limitations:
-    p = tf_lim.paragraphs[0] if first else tf_lim.add_paragraph()
-    first = False
-    r = p.add_run(); r.text = cat
-    r.font.size = Pt(8.5); r.font.bold = True; r.font.color.rgb = ORANGE_ALERT
-    for item in items:
-        pd = tf_lim.add_paragraph()
-        rd = pd.add_run(); rd.text = "  • " + item
-        rd.font.size = Pt(7.5); rd.font.color.rgb = DARK_SLATE
-
-add_rect(s12, Inches(5.15), Inches(1.0), Inches(4.65), Inches(3.85),
-         RGBColor(0xf0, 0xff, 0xf0), GREEN_ACCENT, 1.2)
-add_rect(s12, Inches(5.15), Inches(1.0), Inches(4.65), Inches(0.3), GREEN_ACCENT)
-tb_rh = s12.shapes.add_textbox(Inches(5.25), Inches(1.02), Inches(4.45), Inches(0.26))
-p_rh = tb_rh.text_frame.paragraphs[0]
-r_rh = p_rh.add_run(); r_rh.text = "🚀  6-Phase Roadmap (3 Years)"
-r_rh.font.size = Pt(10); r_rh.font.bold = True; r_rh.font.color.rgb = WHITE
-
-tb_rm = s12.shapes.add_textbox(Inches(5.25), Inches(1.35), Inches(4.45), Inches(3.45))
-tf_rm = tb_rm.text_frame; tf_rm.word_wrap = True
-first2 = True
-for phase, items in roadmap:
-    p = tf_rm.paragraphs[0] if first2 else tf_rm.add_paragraph()
-    first2 = False
-    r = p.add_run(); r.text = phase
-    r.font.size = Pt(8.5); r.font.bold = True; r.font.color.rgb = GREEN_ACCENT
-    for item in items:
-        pd = tf_rm.add_paragraph()
-        rd = pd.add_run(); rd.text = "  • " + item
-        rd.font.size = Pt(7.5); rd.font.color.rgb = DARK_SLATE
-
-# Impact projection
-add_rect(s12, Inches(0.2), Inches(4.92), Inches(9.6), Inches(0.38),
-         RGBColor(0xe8, 0xf4, 0xff), TEAL, 1)
-add_textbox(s12,
-    "Impact Projection: Full deployment expected to reduce flood casualties by 60–70%, "
-    "provide 2–4 hour advance warning, and protect $300M+ in annual economic value.",
-    Inches(0.3), Inches(4.95), Inches(9.4), Inches(0.33),
-    font_size=8.5, italic=True, color=PRIMARY_BLUE, align=PP_ALIGN.CENTER)
-
-add_footer(s12, 12, W, H)
-add_fade_transition(s12)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 13 — Conclusion
-# ══════════════════════════════════════════════════════════════════════════════
-s13 = prs.slides.add_slide(blank)
-set_bg(s13, LIGHT_GRAY)
-add_title(s13, "Conclusion: Networking for Resilience", top=Inches(0.25))
-add_teal_underline(s13, Inches(0.88))
-
-# Left body
-tb13 = s13.shapes.add_textbox(Inches(0.3), Inches(1.05), Inches(6.6), Inches(4.15))
-tf13 = tb13.text_frame; tf13.word_wrap = True
-
-conclusion_lines = [
-    ("ACHIEVEMENT SUMMARY", True, TEAL),
-    ("HydroNet successfully demonstrates a complete, production-ready network architecture for Chittagong's flood resilience challenge.", False, DARK_SLATE),
-    ("", False, DARK_SLATE),
-    ("KEY ACCOMPLISHMENTS:", True, PRIMARY_BLUE),
-    ("✔  4-zone hierarchical network with 12 VLANs fully operational", False, DARK_SLATE),
-    ("✔  20+ IoT sensors across Coastal, Riverine, Hilly, and Urban zones", False, DARK_SLATE),
-    ("✔  OSPF dynamic routing with sub-5s convergence", False, DARK_SLATE),
-    ("✔  Full server suite: DHCP, DNS, Web, Email, MQTT broker", False, DARK_SLATE),
-    ("✔  NAT + ACL security with zone isolation", False, DARK_SLATE),
-    ("✔  Real-time monitoring dashboard at monitor.hydronet.local", False, DARK_SLATE),
-    ("✔  Automated flood alert emails to zone officers", False, DARK_SLATE),
-    ("", False, DARK_SLATE),
-    ("TECHNICAL EXCELLENCE:", True, PRIMARY_BLUE),
-    ("✔  Industry-standard Cisco equipment (3945, 2901, 3750-X, 2960-X)", False, DARK_SLATE),
-    ("✔  Designed to scale to 12 zones with phased roadmap", False, DARK_SLATE),
-    ("✔  Fully verified in Cisco Packet Tracer 8.2.2", False, DARK_SLATE),
-    ("", False, DARK_SLATE),
-    ("IMPACT: Potential to save hundreds of lives annually and protect $300M+ in infrastructure.", False, PRIMARY_BLUE),
-]
-
-for i, (txt, bold, col) in enumerate(conclusion_lines):
-    p = tf13.paragraphs[0] if i == 0 else tf13.add_paragraph()
-    r = p.add_run(); r.text = txt
-    r.font.size = Pt(8.5) if not bold else Pt(9)
-    r.font.bold = bold; r.font.color.rgb = col; r.font.name = 'Calibri'
-
-# Right accent: matplotlib circle with mission text
-fig13, ax13 = plt.subplots(figsize=(2.9, 3.6))
-fig13.patch.set_facecolor('#f0f0f0'); ax13.set_facecolor('#f0f0f0')
-ax13.set_xlim(-1.5, 1.5); ax13.set_ylim(-1.8, 1.8); ax13.axis('off')
-
-for r_, alpha_, color_ in [(1.4, 0.15, '#1a3a6b'), (1.2, 0.2, '#00b4d8'), (1.0, 1.0, '#1a3a6b')]:
-    c13 = Circle((0, 0.1), r_, color=color_, alpha=alpha_)
-    ax13.add_patch(c13)
-
-ax13.text(0, 0.75, "4 ZONES", ha='center', va='center',
-          fontsize=9, color='white', fontweight='bold')
-ax13.text(0, 0.42, "20+ SENSORS", ha='center', va='center',
-          fontsize=8.5, color='#00d4ff', fontweight='bold')
-ax13.text(0, 0.12, "5 SERVERS", ha='center', va='center',
-          fontsize=8.5, color='white', fontweight='bold')
-ax13.text(0, -0.2, "1 MISSION:", ha='center', va='center',
-          fontsize=8, color='#ffcc00', fontweight='bold')
-ax13.text(0, -0.52, "SAVE LIVES", ha='center', va='center',
-          fontsize=10, color='#ff8c00', fontweight='bold')
-
-ax13.text(0, -1.3, '"Resilience through\nconnectivity"',
-          ha='center', va='center', fontsize=7.5,
-          color='#1a3a6b', style='italic')
-
-buf13 = fig_to_buf(fig13)
-s13.shapes.add_picture(buf13, Inches(7.0), Inches(0.95), Inches(2.8), Inches(3.6))
-
-add_footer(s13, 13, W, H)
-add_fade_transition(s13)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SLIDE 14 — Thank You & Team Credits
-# ══════════════════════════════════════════════════════════════════════════════
-s14 = prs.slides.add_slide(blank)
-set_bg(s14, NAVY)
-
-# Split background: left NAVY, right TEAL_BRIGHT
-add_rect(s14, 0, 0, Inches(5.3), H, NAVY)
-add_rect(s14, Inches(5.3), 0, Inches(4.7), H, TEAL_BRIGHT)
-
-# Left side — Thank you
-tb_ty = s14.shapes.add_textbox(Inches(0.3), Inches(0.55), Inches(4.8), Inches(0.9))
-tf_ty = tb_ty.text_frame; p_ty = tf_ty.paragraphs[0]
-p_ty.alignment = PP_ALIGN.LEFT
-r_ty = p_ty.add_run(); r_ty.text = "THANK YOU"
-r_ty.font.size = Pt(44); r_ty.font.bold = True
-r_ty.font.color.rgb = WHITE; r_ty.font.name = 'Calibri'
-
-tb_fl = s14.shapes.add_textbox(Inches(0.3), Inches(1.55), Inches(4.8), Inches(0.5))
-tf_fl = tb_fl.text_frame; p_fl = tf_fl.paragraphs[0]
-r_fl = p_fl.add_run(); r_fl.text = "for Listening"
-r_fl.font.size = Pt(24); r_fl.font.italic = True
-r_fl.font.color.rgb = TEAL; r_fl.font.name = 'Calibri'
-
-tb_q = s14.shapes.add_textbox(Inches(0.3), Inches(2.3), Inches(4.8), Inches(0.5))
-tf_q = tb_q.text_frame; p_q = tf_q.paragraphs[0]
-r_q = p_q.add_run(); r_q.text = "Questions & Discussion Welcome"
-r_q.font.size = Pt(11); r_q.font.color.rgb = RGBColor(0xcc, 0xcc, 0xcc)
-
-# White bars
-for bi, bw in enumerate([Inches(3.8), Inches(2.9), Inches(2.0)]):
-    bar14 = add_rect(s14, Inches(0.3), Inches(3.15 + bi * 0.28), bw, Inches(0.12),
-                     WHITE)
-
-# Right side — Team info
-tb_team = s14.shapes.add_textbox(Inches(5.5), Inches(0.4), Inches(4.2), Inches(0.42))
-tf_team = tb_team.text_frame; p_team = tf_team.paragraphs[0]
-r_team = p_team.add_run(); r_team.text = "TEAM HydroNet Trio"
-r_team.font.size = Pt(17); r_team.font.bold = True
-r_team.font.color.rgb = NAVY; r_team.font.name = 'Calibri'
-
-members = [
-    ("Abu Md. Selim",    "ID: 2103910202114",   "Team Lead / Network Architect"),
-    ("Arifur Rahman",    "ID: 0222320005101088", "IoT Integration & Routing"),
-    ("Sadab Abdullah",   "ID: 0222220005101143", "Security & Server Config"),
-]
-for mi, (mname, mid, mrole) in enumerate(members):
-    mb_l = Inches(5.5); mb_t = Inches(0.97 + mi * 0.88)
-    add_rect(s14, mb_l, mb_t, Inches(4.2), Inches(0.75),
-             RGBColor(0xff, 0xff, 0xff), NAVY, 1)
-    tb_mn = s14.shapes.add_textbox(mb_l + Inches(0.1), mb_t + Inches(0.06),
-                                    Inches(4.0), Inches(0.28))
-    tf_mn = tb_mn.text_frame; p_mn = tf_mn.paragraphs[0]
-    r_mn = p_mn.add_run(); r_mn.text = mname
-    r_mn.font.size = Pt(11); r_mn.font.bold = True
-    r_mn.font.color.rgb = PRIMARY_BLUE; r_mn.font.name = 'Calibri'
-
-    tb_mid = s14.shapes.add_textbox(mb_l + Inches(0.1), mb_t + Inches(0.35),
-                                     Inches(4.0), Inches(0.35))
-    tf_mid = tb_mid.text_frame; tf_mid.word_wrap = True
-    for j, mtxt in enumerate([mid, mrole]):
-        p2 = tf_mid.paragraphs[0] if j == 0 else tf_mid.add_paragraph()
-        r2 = p2.add_run(); r2.text = mtxt
-        r2.font.size = Pt(8.5); r2.font.color.rgb = DARK_SLATE
-
-# University info
-tb_uni = s14.shapes.add_textbox(Inches(5.5), Inches(3.7), Inches(4.2), Inches(0.6))
-tf_uni = tb_uni.text_frame; tf_uni.word_wrap = True
-uni_lines = [
-    ("Premier University, Chittagong", True),
-    ("Dept. of Computer Science & Engineering", False),
-    ("6th Semester — Network Architecture — March 2025", False),
-]
-for j, (ul, ub) in enumerate(uni_lines):
-    p2 = tf_uni.paragraphs[0] if j == 0 else tf_uni.add_paragraph()
-    r2 = p2.add_run(); r2.text = ul
-    r2.font.size = Pt(8.5 if ub else 8); r2.font.bold = ub
-    r2.font.color.rgb = NAVY; r2.font.name = 'Calibri'
-
-# Bottom full-width bar
-add_rect(s14, 0, H - Inches(0.55), W, Inches(0.55), PRIMARY_BLUE)
-tb_bot = s14.shapes.add_textbox(Inches(0.2), H - Inches(0.52), W - Inches(0.4), Inches(0.42))
-tf_bot = tb_bot.text_frame; p_bot = tf_bot.paragraphs[0]
-p_bot.alignment = PP_ALIGN.CENTER
-r_bot = p_bot.add_run()
-r_bot.text = ("monitor.hydronet.local  |  admin@hydronet.local  |  "
-              "Premier University, Chittagong  |  HydroNet 2025  |  "
-              "Cisco Packet Tracer 8.2.2")
-r_bot.font.size = Pt(7.5); r_bot.font.color.rgb = WHITE; r_bot.font.name = 'Calibri'
-
-add_footer(s14, 14, W, H)
-add_fade_transition(s14)
-
-# ── Save ───────────────────────────────────────────────────────────────────────
-prs.save("HydroNet_Chittagong_Resilience_Final.pptx")
-print("Generated: HydroNet_Chittagong_Resilience_Final.pptx (14 slides)")
+    run = p.add_run()
+    run.text = text
+    run.font.name = font_name
+    run.font.size = Pt(font_size)
+    run.font.bold = bold
+    run.font.italic = italic
+    if color:
+        run.font.color.rgb = color
+    return txb
+
+
+def add_para(tf, text, font_name="Calibri", font_size=11, bold=False,
+             italic=False, color=None, align=PP_ALIGN.LEFT, space_before=0):
+    p = tf.add_paragraph()
+    p.alignment = align
+    if space_before:
+        p.space_before = Pt(space_before)
+    run = p.add_run()
+    run.text = text
+    run.font.name = font_name
+    run.font.size = Pt(font_size)
+    run.font.bold = bold
+    run.font.italic = italic
+    if color:
+        run.font.color.rgb = color
+    return p
+
+
+def fig_to_stream(fig, dpi=150):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+
+def add_underline_bar(slide, left, top, width, color: RGBColor, height=Pt(2)):
+    return add_rect(slide, left, top, width, height, fill=color)
+
+
+def set_slide_background(slide, color: RGBColor):
+    background = slide.background
+    fill = background.fill
+    fill.solid()
+    fill.fore_color.rgb = color
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DIAGRAM GENERATORS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_arch_overview_diagram() -> io.BytesIO:
+    """Slide 5 – three-tier architecture overview."""
+    fig, ax = plt.subplots(figsize=(14, 8))
+    fig.patch.set_facecolor(_HEX["lgray"])
+    ax.set_facecolor(_HEX["lgray"])
+    ax.axis("off")
+
+    def box(ax, x, y, w, h, txt, bg, fg="white", border=_HEX["teal"], lw=2, fs=9):
+        rect = mpatches.FancyBboxPatch(
+            (x - w / 2, y - h / 2), w, h,
+            boxstyle="round,pad=0.02",
+            facecolor=bg, edgecolor=border, linewidth=lw
+        )
+        ax.add_patch(rect)
+        ax.text(x, y, txt, ha="center", va="center", color=fg,
+                fontsize=fs, fontweight="bold", wrap=True,
+                multialignment="center")
+
+    def arrow(ax, x1, y1, x2, y2, color=_HEX["teal"], lw=2, style="->"):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle=style, color=color, lw=lw))
+
+    # ── Tier labels ──────────────────────────────────────────────────────────
+    for label, ypos in [("TIER 1 — Core Layer", 9),
+                         ("TIER 2 — Distribution Layer", 6.2),
+                         ("TIER 3 — Access & IoT Layer", 3.2)]:
+        ax.text(0.3, ypos, label, ha="left", va="center",
+                color=_HEX["navy"], fontsize=9, fontstyle="italic",
+                fontweight="bold")
+
+    # ── OSPF area 0 band ─────────────────────────────────────────────────────
+    ax.add_patch(mpatches.FancyBboxPatch((0.5, 8), 13, 1.3,
+                 boxstyle="round,pad=0.05",
+                 facecolor="#d6eaf8", edgecolor=_HEX["teal"], linewidth=1.5,
+                 alpha=0.5))
+    ax.text(7, 8.65, "OSPF Area 0  (Backbone — 10.0.0.0/16)",
+            ha="center", color=_HEX["navy"], fontsize=9, fontstyle="italic")
+
+    # Core routers
+    box(ax, 4.5, 8.65, 2.6, 0.85,
+        "Core Router 1\n(3945 ISR) | 10.0.0.1", _HEX["navy"], lw=3, fs=9)
+    box(ax, 9.5, 8.65, 2.6, 0.85,
+        "Core Router 2\n(3945 ISR) | 10.0.1.1", _HEX["navy"], lw=3, fs=9)
+    # Redundancy double-line
+    ax.annotate("", xy=(7.2, 8.65), xytext=(5.8, 8.65),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["teal"], lw=2.5))
+    ax.text(7, 9.1, "Redundancy", ha="center", fontsize=7.5, color=_HEX["teal"])
+
+    # Core switch (server pool)
+    box(ax, 7, 7.3, 2.4, 0.7,
+        "Core Switch\nCatalyst 3650 | 10.0.0.10", _HEX["teal"],
+        fg=_HEX["slate"], border=_HEX["navy"], fs=8)
+    arrow(ax, 7, 7.65, 7, 8.2)
+
+    # ── Zone distribution routers ─────────────────────────────────────────────
+    zone_xs = [2, 5, 9, 12]
+    zone_labels = [
+        "Z1 Router\nCisco 2901\n10.1.0.1\nOSPF Area 1",
+        "Z2 Router\nCisco 2901\n10.2.0.1\nOSPF Area 2",
+        "Z3 Router\nCisco 2901\n10.3.0.1\nOSPF Area 3",
+        "Z4 Router\nCisco 2901\n10.4.0.1\nOSPF Area 4",
+    ]
+    zone_bg = [_HEX["orange"], _HEX["teal"], _HEX["purple"], _HEX["green"]]
+    for x, lbl, bg in zip(zone_xs, zone_labels, zone_bg):
+        box(ax, x, 6.2, 2.2, 1.0, lbl, bg, fs=8)
+        arrow(ax, x, 6.7, x if x not in (2, 12) else (4.5 if x == 2 else 9.5),
+              8.2, color=bg, lw=1.8)
+
+    # ── Access layer ─────────────────────────────────────────────────────────
+    iot_colors = [_HEX["orange"], _HEX["teal"], _HEX["purple"], _HEX["green"]]
+    for xi, (x, bg) in enumerate(zip(zone_xs, iot_colors)):
+        # Switch
+        box(ax, x, 4.65, 1.8, 0.55,
+            f"2960-X Switch\n10.{xi+1}.0.5", "#2c3e50",
+            fg="white", border=bg, fs=7.5)
+        arrow(ax, x, 4.93, x, 5.7, color=bg, lw=1.5)
+        # AP
+        box(ax, x, 3.9, 1.8, 0.55,
+            f"AP Zone-{xi+1}\nSSID: Z{xi+1}-HydroNet", "#8e44ad",
+            fg="white", border=bg, fs=7.5)
+        arrow(ax, x, 4.18, x, 4.38, color=bg, lw=1.5, style="->")
+        # IoT circles
+        for j in range(5):
+            cx = x - 0.9 + j * 0.45
+            cy = 3.05
+            circ = plt.Circle((cx, cy), 0.18, color=_HEX["green"],
+                               ec=_HEX["slate"], linewidth=0.8)
+            ax.add_patch(circ)
+        ax.text(x, 2.6, "5× IoT Sensors", ha="center", fontsize=7,
+                color=_HEX["slate"])
+        arrow(ax, x, 3.45, x, 3.62, color=_HEX["green"], lw=1.2)
+
+    # ── Servers (bottom-centre) ───────────────────────────────────────────────
+    box(ax, 7, 1.4, 3.8, 0.9,
+        "DHCP | DNS | Web | Email | Syslog\n10.0.100.1 – 10.0.100.5  (VLAN 100)",
+        _HEX["lgray"], fg=_HEX["slate"], border=_HEX["navy"], fs=8)
+    arrow(ax, 7, 1.85, 7, 6.9, color=_HEX["navy"], lw=1.5)
+
+    # ── Legend ────────────────────────────────────────────────────────────────
+    legend_items = [
+        (mpatches.Patch(color=_HEX["navy"]), "Core Router"),
+        (mpatches.Patch(color=_HEX["teal"]), "Zone Router / Switch"),
+        (mpatches.Patch(color=_HEX["green"]), "IoT Sensor"),
+        (mpatches.Patch(color=_HEX["lgray"], ec=_HEX["navy"]), "Server"),
+    ]
+    ax.legend(
+        [h for h, _ in legend_items],
+        [l for _, l in legend_items],
+        loc="lower right", fontsize=8,
+        facecolor=_HEX["white"], edgecolor=_HEX["navy"]
+    )
+
+    ax.set_xlim(0, 14)
+    ax.set_ylim(0.8, 10)
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_full_topology_diagram() -> io.BytesIO:
+    """Slide 6 – full hierarchical network topology using networkx."""
+    G = nx.DiGraph()
+
+    nodes = {
+        # Core
+        "Core-R1": {"label": "Core-R1\n10.0.0.1", "color": _HEX["navy"],  "size": 2400, "layer": 4},
+        "Core-R2": {"label": "Core-R2\n10.0.1.1", "color": _HEX["navy"],  "size": 2400, "layer": 4},
+        "Core-SW": {"label": "Core-SW\n10.0.0.10","color": _HEX["teal"],  "size": 1800, "layer": 3},
+        # Servers
+        "Servers": {"label": "DHCP|DNS\nWeb|Mail|Syslog", "color": "#bdc3c7", "size": 2000, "layer": 2},
+        # ISP
+        "ISP":     {"label": "ISP\n172.16.0.1",    "color": _HEX["orange"], "size": 1600, "layer": 4},
+        # Zone 1
+        "Z1-R":  {"label": "Z1-Router\n10.1.0.1", "color": _HEX["orange"], "size": 1600, "layer": 3},
+        "Z1-SW": {"label": "Z1-Switch\n10.1.0.5", "color": "#e67e22",       "size": 1200, "layer": 2},
+        "Z1-AP": {"label": "Z1-AP",               "color": "#f39c12",       "size": 900,  "layer": 1},
+        "Z1-WL": {"label": "WL-Z1\n10.1.1.10",   "color": _HEX["green"],  "size": 700,  "layer": 0},
+        "Z1-RF": {"label": "Rain-Z1\n10.1.1.20",  "color": _HEX["green"],  "size": 700,  "layer": 0},
+        "Z1-TS": {"label": "Tidal-Z1\n10.1.1.30", "color": _HEX["green"],  "size": 700,  "layer": 0},
+        "Z1-TM": {"label": "Temp-Z1\n10.1.1.40",  "color": _HEX["green"],  "size": 700,  "layer": 0},
+        "Z1-CA": {"label": "Cam-Z1\n10.1.1.50",   "color": _HEX["green"],  "size": 700,  "layer": 0},
+        # Zone 2
+        "Z2-R":  {"label": "Z2-Router\n10.2.0.1", "color": _HEX["teal"],  "size": 1600, "layer": 3},
+        "Z2-SW": {"label": "Z2-Switch\n10.2.0.5", "color": "#1abc9c",     "size": 1200, "layer": 2},
+        "Z2-AP": {"label": "Z2-AP",               "color": "#16a085",     "size": 900,  "layer": 1},
+        "Z2-WL": {"label": "WL-Z2\n10.2.1.10",   "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z2-RF": {"label": "Rain-Z2\n10.2.1.20",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z2-HM": {"label": "Hum-Z2\n10.2.1.30",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z2-TM": {"label": "Temp-Z2\n10.2.1.40",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z2-CA": {"label": "Cam-Z2\n10.2.1.50",   "color": _HEX["green"], "size": 700,  "layer": 0},
+        # Zone 3
+        "Z3-R":  {"label": "Z3-Router\n10.3.0.1", "color": _HEX["purple"],"size": 1600, "layer": 3},
+        "Z3-SW": {"label": "Z3-Switch\n10.3.0.5", "color": "#8e44ad",     "size": 1200, "layer": 2},
+        "Z3-AP": {"label": "Z3-AP",               "color": "#9b59b6",     "size": 900,  "layer": 1},
+        "Z3-WL": {"label": "WL-Z3\n10.3.1.10",   "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z3-TS": {"label": "Tidal-Z3\n10.3.1.20", "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z3-TM": {"label": "Temp-Z3\n10.3.1.30",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z3-HM": {"label": "Hum-Z3\n10.3.1.40",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        "Z3-RF": {"label": "Rain-Z3\n10.3.1.50",  "color": _HEX["green"], "size": 700,  "layer": 0},
+        # Zone 4
+        "Z4-R":  {"label": "Z4-Router\n10.4.0.1", "color": _HEX["green"], "size": 1600, "layer": 3},
+        "Z4-SW": {"label": "Z4-Switch\n10.4.0.5", "color": "#27ae60",     "size": 1200, "layer": 2},
+        "Z4-AP": {"label": "Z4-AP",               "color": "#2ecc71",     "size": 900,  "layer": 1},
+        "Z4-WL": {"label": "WL-Z4\n10.4.1.10",   "color": "#a9dfbf",     "size": 700,  "layer": 0},
+        "Z4-RF": {"label": "Rain-Z4\n10.4.1.20",  "color": "#a9dfbf",     "size": 700,  "layer": 0},
+        "Z4-HM": {"label": "Hum-Z4\n10.4.1.30",  "color": "#a9dfbf",     "size": 700,  "layer": 0},
+        "Z4-TM": {"label": "Temp-Z4\n10.4.1.40",  "color": "#a9dfbf",     "size": 700,  "layer": 0},
+        "Z4-CA": {"label": "Cam-Z4\n10.4.1.50",   "color": "#a9dfbf",     "size": 700,  "layer": 0},
+    }
+
+    for n, d in nodes.items():
+        G.add_node(n, **d)
+
+    edges = [
+        # Core redundancy
+        ("Core-R1", "Core-R2", {"style": "solid", "color": _HEX["teal"],  "width": 3}),
+        ("Core-R1", "Core-SW", {"style": "solid", "color": _HEX["teal"],  "width": 2}),
+        ("Core-R2", "Core-SW", {"style": "solid", "color": _HEX["teal"],  "width": 2}),
+        # Core to servers
+        ("Core-SW", "Servers", {"style": "solid", "color": _HEX["navy"],  "width": 2}),
+        # Core to ISP
+        ("Core-R1", "ISP",     {"style": "dashed","color": _HEX["orange"],"width": 1.5}),
+        # Core to zone routers
+        ("Core-R1", "Z1-R",   {"style": "solid", "color": _HEX["orange"],"width": 2}),
+        ("Core-R1", "Z2-R",   {"style": "solid", "color": _HEX["teal"],  "width": 2}),
+        ("Core-R2", "Z3-R",   {"style": "solid", "color": _HEX["purple"],"width": 2}),
+        ("Core-R2", "Z4-R",   {"style": "solid", "color": _HEX["green"], "width": 2}),
+        # Zone 1
+        ("Z1-R","Z1-SW",{"style":"solid", "color":_HEX["orange"],"width":1.8}),
+        ("Z1-SW","Z1-AP",{"style":"dashed","color":_HEX["orange"],"width":1.2}),
+        ("Z1-AP","Z1-WL",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z1-AP","Z1-RF",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z1-AP","Z1-TS",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z1-AP","Z1-TM",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z1-AP","Z1-CA",{"style":"dotted","color":_HEX["green"],"width":1}),
+        # Zone 2
+        ("Z2-R","Z2-SW",{"style":"solid", "color":_HEX["teal"],  "width":1.8}),
+        ("Z2-SW","Z2-AP",{"style":"dashed","color":_HEX["teal"],  "width":1.2}),
+        ("Z2-AP","Z2-WL",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z2-AP","Z2-RF",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z2-AP","Z2-HM",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z2-AP","Z2-TM",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z2-AP","Z2-CA",{"style":"dotted","color":_HEX["green"],"width":1}),
+        # Zone 3
+        ("Z3-R","Z3-SW",{"style":"solid", "color":_HEX["purple"],"width":1.8}),
+        ("Z3-SW","Z3-AP",{"style":"dashed","color":_HEX["purple"],"width":1.2}),
+        ("Z3-AP","Z3-WL",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z3-AP","Z3-TS",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z3-AP","Z3-TM",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z3-AP","Z3-HM",{"style":"dotted","color":_HEX["green"],"width":1}),
+        ("Z3-AP","Z3-RF",{"style":"dotted","color":_HEX["green"],"width":1}),
+        # Zone 4
+        ("Z4-R","Z4-SW",{"style":"solid", "color":_HEX["green"], "width":1.8}),
+        ("Z4-SW","Z4-AP",{"style":"dashed","color":_HEX["green"], "width":1.2}),
+        ("Z4-AP","Z4-WL",{"style":"dotted","color":"#a9dfbf","width":1}),
+        ("Z4-AP","Z4-RF",{"style":"dotted","color":"#a9dfbf","width":1}),
+        ("Z4-AP","Z4-HM",{"style":"dotted","color":"#a9dfbf","width":1}),
+        ("Z4-AP","Z4-TM",{"style":"dotted","color":"#a9dfbf","width":1}),
+        ("Z4-AP","Z4-CA",{"style":"dotted","color":"#a9dfbf","width":1}),
+    ]
+    for u, v, d in edges:
+        G.add_edge(u, v, **d)
+
+    # Manual positions — hierarchical spread
+    pos = {
+        "Core-R1": (-2.5, 5), "Core-R2": (2.5, 5),
+        "Core-SW": (0, 4),    "Servers": (0, 3),
+        "ISP": (5.5, 5),
+        # Zone1 (far-left)
+        "Z1-R": (-8,4),  "Z1-SW":(-8,3),  "Z1-AP":(-8,2),
+        "Z1-WL":(-9.8,1),"Z1-RF":(-9.1,1),"Z1-TS":(-8.4,1),"Z1-TM":(-7.7,1),"Z1-CA":(-7,1),
+        # Zone2
+        "Z2-R": (-4,4),  "Z2-SW":(-4,3),  "Z2-AP":(-4,2),
+        "Z2-WL":(-5.8,1),"Z2-RF":(-5.1,1),"Z2-HM":(-4.4,1),"Z2-TM":(-3.7,1),"Z2-CA":(-3,1),
+        # Zone3
+        "Z3-R": (4,4),   "Z3-SW":(4,3),   "Z3-AP":(4,2),
+        "Z3-WL":(2.2,1), "Z3-TS":(2.9,1), "Z3-TM":(3.6,1),"Z3-HM":(4.3,1),"Z3-RF":(5,1),
+        # Zone4
+        "Z4-R": (8,4),   "Z4-SW":(8,3),   "Z4-AP":(8,2),
+        "Z4-WL":(6.2,1), "Z4-RF":(6.9,1), "Z4-HM":(7.6,1),"Z4-TM":(8.3,1),"Z4-CA":(9,1),
+    }
+
+    fig, ax = plt.subplots(figsize=(22, 10))
+    fig.patch.set_facecolor(_HEX["white"])
+    ax.set_facecolor(_HEX["white"])
+    ax.axis("off")
+
+    node_list    = list(G.nodes())
+    node_colors  = [nodes[n]["color"] for n in node_list]
+    node_sizes   = [nodes[n]["size"]  for n in node_list]
+
+    # Draw edges by style
+    for style, ls in [("solid","-"),("dashed","--"),("dotted",":")]:
+        elist = [(u,v) for u,v,d in G.edges(data=True) if d.get("style")==style]
+        ecolors = [G.edges[u,v]["color"] for u,v in elist]
+        ewidths = [G.edges[u,v]["width"] for u,v in elist]
+        nx.draw_networkx_edges(G, pos, edgelist=elist,
+                               edge_color=ecolors, width=ewidths,
+                               style=ls, ax=ax, arrows=False)
+
+    nx.draw_networkx_nodes(G, pos, node_color=node_colors,
+                           node_size=node_sizes, ax=ax)
+    labels = {n: d["label"] for n, d in nodes.items()}
+    nx.draw_networkx_labels(G, pos, labels=labels, font_size=5.5,
+                            font_color="white", ax=ax)
+
+    # Legend
+    legend_handles = [
+        mpatches.Patch(color=_HEX["navy"],   label="Core Router"),
+        mpatches.Patch(color=_HEX["teal"],   label="Zone 2 Router"),
+        mpatches.Patch(color=_HEX["orange"], label="Zone 1 Router"),
+        mpatches.Patch(color=_HEX["purple"], label="Zone 3 Router"),
+        mpatches.Patch(color=_HEX["green"],  label="Zone 4 Router / IoT"),
+        mpatches.Patch(color="#bdc3c7",      label="Servers"),
+    ]
+    ax.legend(handles=legend_handles, loc="lower right",
+              fontsize=8, facecolor=_HEX["white"])
+
+    # VLAN / subnet annotations
+    for zone, x, y in [("10.1.0.0/16",-8,4.6),("10.2.0.0/16",-4,4.6),
+                        ("10.3.0.0/16",4,4.6),("10.4.0.0/16",8,4.6)]:
+        ax.text(x, y, zone, ha="center", fontsize=7,
+                color=_HEX["slate"], style="italic")
+
+    ax.set_xlim(-11.5, 11)
+    ax.set_ylim(0.2, 6)
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_ospf_diagram() -> io.BytesIO:
+    """Slide 8 – OSPF multi-area routing diagram."""
+    fig, ax = plt.subplots(figsize=(13, 7))
+    fig.patch.set_facecolor(_HEX["white"])
+    ax.set_facecolor(_HEX["white"])
+    ax.axis("off")
+
+    def draw_area(ax, cx, cy, r, label, bg, txt_color="white"):
+        circ = plt.Circle((cx, cy), r, color=bg, ec=_HEX["navy"], linewidth=2, alpha=0.25)
+        ax.add_patch(circ)
+        ax.text(cx, cy + r + 0.15, label, ha="center", fontsize=9,
+                fontweight="bold", color=bg)
+
+    def router_box(ax, x, y, label, bg):
+        rect = mpatches.FancyBboxPatch((x-0.7, y-0.3), 1.4, 0.6,
+               boxstyle="round,pad=0.05", facecolor=bg,
+               edgecolor=_HEX["white"], linewidth=1.5)
+        ax.add_patch(rect)
+        ax.text(x, y, label, ha="center", va="center",
+                color="white", fontsize=8, fontweight="bold")
+
+    # Area 0 backbone (centre)
+    draw_area(ax, 6.5, 3.5, 1.3, "Area 0\nOSPF Backbone", _HEX["navy"])
+    router_box(ax, 6.0, 3.5, "Core-R1\n0.0.0.1", _HEX["navy"])
+    router_box(ax, 7.0, 3.5, "Core-R2\n0.0.0.2", _HEX["navy"])
+    ax.annotate("", xy=(7.0, 3.5), xytext=(6.0, 3.5),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["teal"], lw=2))
+
+    # Area 1 – top-left
+    draw_area(ax, 2.2, 5.8, 1.1, "Area 1", _HEX["orange"])
+    router_box(ax, 2.2, 5.8, "Z1-Router\n0.0.0.3", _HEX["orange"])
+    ax.annotate("", xy=(2.2, 5.8), xytext=(5.9, 4.1),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["orange"], lw=1.8,
+                                connectionstyle="arc3,rad=0.1"))
+    ax.text(3.8, 5.3, "OSPF Hello 10s\nDead 40s", fontsize=7.5,
+            color=_HEX["orange"], style="italic", ha="center")
+
+    # Area 2 – top-right
+    draw_area(ax, 10.8, 5.8, 1.1, "Area 2", _HEX["teal"])
+    router_box(ax, 10.8, 5.8, "Z2-Router\n0.0.0.4", _HEX["teal"])
+    ax.annotate("", xy=(10.8, 5.8), xytext=(7.1, 4.1),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["teal"], lw=1.8,
+                                connectionstyle="arc3,rad=-0.1"))
+
+    # Area 3 – bottom-left
+    draw_area(ax, 2.2, 1.2, 1.1, "Area 3", _HEX["purple"])
+    router_box(ax, 2.2, 1.2, "Z3-Router\n0.0.0.5", _HEX["purple"])
+    ax.annotate("", xy=(2.2, 1.2), xytext=(5.9, 2.9),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["purple"], lw=1.8,
+                                connectionstyle="arc3,rad=-0.1"))
+
+    # Area 4 – bottom-right
+    draw_area(ax, 10.8, 1.2, 1.1, "Area 4", _HEX["green"])
+    router_box(ax, 10.8, 1.2, "Z4-Router\n0.0.0.6", _HEX["green"])
+    ax.annotate("", xy=(10.8, 1.2), xytext=(7.1, 2.9),
+                arrowprops=dict(arrowstyle="<->", color=_HEX["green"], lw=1.8,
+                                connectionstyle="arc3,rad=0.1"))
+
+    # OSPF config box
+    cfg_text = (
+        "OSPF Configuration Summary\n"
+        "──────────────────────────\n"
+        "Process ID  : 1\n"
+        "Area 0      : Backbone (Core routers)\n"
+        "Areas 1–4   : Normal (Zone routers)\n"
+        "Hello Int.  : 10 s\n"
+        "Dead Int.   : 40 s\n"
+        "Auth        : MD5 (Area 0)\n"
+        "Redistrib.  : Static default → Area 0"
+    )
+    ax.text(6.5, 3.5, cfg_text, ha="center", va="center",
+            fontsize=7.5, color=_HEX["slate"],
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="#f0f3f4",
+                      edgecolor=_HEX["navy"], linewidth=1))
+
+    ax.set_xlim(0.5, 12.5)
+    ax.set_ylim(0, 7.2)
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_nat_acl_diagram() -> io.BytesIO:
+    """Slide 9 – NAT & ACL flow diagram."""
+    fig, ax = plt.subplots(figsize=(13, 6))
+    fig.patch.set_facecolor(_HEX["lgray"])
+    ax.set_facecolor(_HEX["lgray"])
+    ax.axis("off")
+
+    def box(x, y, w, h, txt, bg, fg="white", fs=9):
+        r = mpatches.FancyBboxPatch((x, y), w, h,
+            boxstyle="round,pad=0.05", facecolor=bg,
+            edgecolor=_HEX["navy"], linewidth=1.5)
+        ax.add_patch(r)
+        ax.text(x + w/2, y + h/2, txt, ha="center", va="center",
+                color=fg, fontsize=fs, fontweight="bold", multialignment="center")
+
+    def arr(x1, y1, x2, y2, lbl="", color=_HEX["navy"]):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=2))
+        if lbl:
+            mx, my = (x1+x2)/2, (y1+y2)/2
+            ax.text(mx, my + 0.12, lbl, ha="center", fontsize=7.5,
+                    color=color, style="italic")
+
+    # Internet / ISP
+    box(0.2, 3.2, 1.8, 0.8, "Internet\nISP 203.x.x.x", _HEX["orange"])
+    arr(2.0, 3.6, 2.8, 3.6, "WAN", _HEX["orange"])
+    # Core Router (NAT)
+    box(2.8, 3.0, 2.2, 1.2, "Core Router 1\n10.0.0.1\nNAT Inside/Outside", _HEX["navy"])
+    arr(5.0, 3.6, 5.8, 3.6, "ACL Check", _HEX["teal"])
+    # ACL box
+    box(5.8, 2.8, 2.6, 1.6,
+        "ACL Rules\n✓ SMTP 25 OUT\n✓ HTTP 80 OUT\n✓ HTTPS 443 OUT\n✗ All other IN",
+        "#2c3e50", fs=8)
+    arr(8.4, 3.6, 9.2, 3.6, "Internal", _HEX["navy"])
+    # Core Switch
+    box(9.2, 3.1, 1.8, 1.0, "Core Switch\n10.0.0.10", _HEX["teal"])
+    arr(11.0, 3.6, 11.8, 3.6)
+    # Servers
+    box(11.8, 3.0, 1.4, 1.2, "Servers\n10.0.100.x", "#bdc3c7", fg=_HEX["slate"], fs=8)
+
+    # NAT translation table
+    nat_txt = (
+        "NAT Translation Table\n"
+        "─────────────────────────────────\n"
+        "Inside Local    →  Inside Global\n"
+        "10.0.100.3:80   →  203.x.x.x:80\n"
+        "10.0.100.4:25   →  203.x.x.x:25\n"
+        "10.1.1.x (IoT)  →  PAT (overload)\n"
+        "PAT Pool: 203.x.x.2 – 203.x.x.10"
+    )
+    ax.text(2.5, 1.8, nat_txt, fontsize=8, color=_HEX["slate"],
+            va="top", family="monospace",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=_HEX["white"],
+                      edgecolor=_HEX["navy"], linewidth=1))
+
+    # ACL detail
+    acl_txt = (
+        "Extended ACL 101 (Outbound)\n"
+        "────────────────────────────────────────\n"
+        "permit tcp 10.0.0.0 0.255.255.255 any eq 25\n"
+        "permit tcp 10.0.0.0 0.255.255.255 any eq 80\n"
+        "permit tcp 10.0.0.0 0.255.255.255 any eq 443\n"
+        "permit ip  10.0.0.0 0.255.255.255 10.0.0.0 0.255.255.255\n"
+        "deny   ip  any any (log)"
+    )
+    ax.text(5.8, 1.8, acl_txt, fontsize=7.5, color=_HEX["slate"],
+            va="top", family="monospace",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=_HEX["white"],
+                      edgecolor=_HEX["teal"], linewidth=1))
+
+    ax.set_xlim(0, 13.5)
+    ax.set_ylim(1.2, 5.2)
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_iot_devices_diagram() -> io.BytesIO:
+    """Slide 10 – IoT device details per zone."""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+    fig.patch.set_facecolor(_HEX["white"])
+
+    zones = [
+        {
+            "title": "Zone 1 — Coastal Port Area",
+            "color": _HEX["orange"],
+            "devices": [
+                ("Water Level Sensor #1", "10.1.1.10", "Ultrasonic"),
+                ("IP Camera #1",          "10.1.1.20", "PoE HD"),
+                ("Tidal Surge Detector #1","10.1.1.30","Pressure"),
+                ("Temperature Sensor #1", "10.1.1.40", "±0.5°C"),
+                ("Rainfall Gauge #1",     "10.1.1.50", "Tipping bucket"),
+            ],
+            "subnet": "10.1.1.0/24 | GW: 10.1.0.1",
+        },
+        {
+            "title": "Zone 2 — Riverine Lowlands",
+            "color": _HEX["teal"],
+            "devices": [
+                ("Water Level Sensor #2", "10.2.1.10", "Ultrasonic"),
+                ("Rainfall Gauge #2",     "10.2.1.20", "Tipping bucket"),
+                ("Humidity Monitor #1",   "10.2.1.30", "Capacitive"),
+                ("Temperature Sensor #2", "10.2.1.40", "±0.5°C"),
+                ("IP Camera #2",          "10.2.1.50", "PoE HD"),
+            ],
+            "subnet": "10.2.1.0/24 | GW: 10.2.0.1",
+        },
+        {
+            "title": "Zone 3 — Hilly Upstream",
+            "color": _HEX["purple"],
+            "devices": [
+                ("Water Level Sensor #3", "10.3.1.10", "Ultrasonic"),
+                ("Tidal Surge Detector #2","10.3.1.20","Pressure"),
+                ("Temperature Sensor #3", "10.3.1.30", "±0.5°C"),
+                ("Humidity Monitor #2",   "10.3.1.40", "Capacitive"),
+                ("Rainfall Gauge #3",     "10.3.1.50", "Tipping bucket"),
+            ],
+            "subnet": "10.3.1.0/24 | GW: 10.3.0.1",
+        },
+        {
+            "title": "Zone 4 — Urban Lowland",
+            "color": _HEX["green"],
+            "devices": [
+                ("Water Level Sensor #4", "10.4.1.10", "Ultrasonic"),
+                ("Rainfall Gauge #4",     "10.4.1.20", "Tipping bucket"),
+                ("Humidity Monitor #3",   "10.4.1.30", "Capacitive"),
+                ("Temperature Sensor #4", "10.4.1.40", "±0.5°C"),
+                ("IP Camera #3",          "10.4.1.50", "PoE HD"),
+            ],
+            "subnet": "10.4.1.0/24 | GW: 10.4.0.1",
+        },
+    ]
+
+    for ax, zone in zip(axes.flatten(), zones):
+        ax.set_facecolor("#f9f9f9")
+        ax.set_title(zone["title"], fontsize=11, fontweight="bold",
+                     color=zone["color"], pad=6)
+        ax.axis("off")
+
+        col_labels = ["Device", "IP Address", "Type"]
+        rows = [(d[0], d[1], d[2]) for d in zone["devices"]]
+
+        table = ax.table(
+            cellText=rows,
+            colLabels=col_labels,
+            cellLoc="left",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.5)
+
+        for (row, col), cell in table.get_celld().items():
+            cell.set_edgecolor(zone["color"])
+            if row == 0:
+                cell.set_facecolor(zone["color"])
+                cell.set_text_props(color="white", fontweight="bold")
+            else:
+                cell.set_facecolor("#ffffff" if row % 2 == 0 else "#f0f0f0")
+                cell.set_text_props(color=_HEX["slate"])
+
+        ax.text(0.5, -0.08, zone["subnet"],
+                transform=ax.transAxes, ha="center",
+                fontsize=8, color=zone["color"], style="italic")
+
+    fig.suptitle("IoT Sensor Inventory — All Four Zones",
+                 fontsize=14, fontweight="bold", color=_HEX["navy"], y=0.99)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_simulation_results_diagram() -> io.BytesIO:
+    """Slide 11 – Packet Tracer simulation results (ping/traceroute summary)."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig.patch.set_facecolor(_HEX["white"])
+
+    # ── Left: ping test results bar chart ────────────────────────────────────
+    tests = [
+        "Z1→CMO\nSensor→Dashboard",
+        "Z2→CMO\nSensor→Dashboard",
+        "Z3→CMO\nSensor→Dashboard",
+        "Z4→CMO\nSensor→Dashboard",
+        "CMO→ISP\nEmail Alert",
+        "Z1→Z2\nCross-Zone",
+        "Failover\n(R1 Down)",
+    ]
+    latency = [12, 14, 18, 11, 45, 22, 38]
+    success = [100, 100, 100, 100, 100, 100, 100]
+    colors_bar = [_HEX["orange"], _HEX["teal"], _HEX["purple"],
+                  _HEX["green"], _HEX["orange"], _HEX["teal"], _HEX["green"]]
+
+    y_pos = range(len(tests))
+    bars = ax1.barh(y_pos, latency, color=colors_bar, edgecolor=_HEX["navy"],
+                    linewidth=0.8, height=0.65)
+    ax1.set_yticks(list(y_pos))
+    ax1.set_yticklabels(tests, fontsize=8.5)
+    ax1.set_xlabel("Average RTT (ms)", fontsize=9, color=_HEX["slate"])
+    ax1.set_title("Ping Test Results (Packet Tracer)", fontsize=11,
+                  fontweight="bold", color=_HEX["navy"])
+    ax1.set_facecolor("#f9f9f9")
+    for bar, val in zip(bars, latency):
+        ax1.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2,
+                 f"{val} ms", va="center", fontsize=8.5, color=_HEX["slate"])
+    ax1.set_xlim(0, 60)
+    ax1.tick_params(colors=_HEX["slate"])
+    for spine in ax1.spines.values():
+        spine.set_edgecolor(_HEX["lgray"])
+
+    # ── Right: OSPF convergence + reliability table ───────────────────────────
+    ax2.axis("off")
+    ax2.set_facecolor("#f9f9f9")
+    ax2.set_title("Simulation Verification Results", fontsize=11,
+                  fontweight="bold", color=_HEX["navy"])
+
+    table_data = [
+        ["Test Scenario",           "Result",    "Detail"],
+        ["OSPF Full Convergence",   "✓ PASS",    "< 2 min (all areas)"],
+        ["DHCP Address Assignment", "✓ PASS",    "All 20 IoT devices"],
+        ["DNS Resolution",          "✓ PASS",    "dashboard.hydronet"],
+        ["Web Dashboard Access",    "✓ PASS",    "HTTP 200 OK"],
+        ["Email Alert (SMTP)",      "✓ PASS",    "Port 25 permitted"],
+        ["NAT Translation",         "✓ PASS",    "PAT overload active"],
+        ["ACL Enforcement",         "✓ PASS",    "Telnet blocked"],
+        ["Failover (R1 Down)",       "✓ PASS",    "R2 takes over ~38ms"],
+        ["VLAN Isolation",          "✓ PASS",    "Inter-VLAN via L3 SW"],
+        ["Packet Loss",             "0 %",       "All test flows"],
+    ]
+
+    t = ax2.table(cellText=table_data[1:], colLabels=table_data[0],
+                  cellLoc="center", loc="center")
+    t.auto_set_font_size(False)
+    t.set_fontsize(8.5)
+    t.scale(1.1, 1.55)
+
+    for (row, col), cell in t.get_celld().items():
+        cell.set_edgecolor(_HEX["teal"])
+        if row == 0:
+            cell.set_facecolor(_HEX["navy"])
+            cell.set_text_props(color="white", fontweight="bold")
+        elif col == 1:
+            cell.set_facecolor("#d5f5e3")
+            cell.set_text_props(color="#1e8449", fontweight="bold")
+        else:
+            cell.set_facecolor("#ffffff" if row % 2 == 1 else "#f2f3f4")
+            cell.set_text_props(color=_HEX["slate"])
+
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_alert_workflow_diagram() -> io.BytesIO:
+    """Slide 12 – disaster alert response workflow."""
+    fig, ax = plt.subplots(figsize=(13, 7))
+    fig.patch.set_facecolor(_HEX["white"])
+    ax.set_facecolor(_HEX["white"])
+    ax.axis("off")
+
+    steps = [
+        (1.5, 6.2, "IoT Sensors\nDetect Anomaly",              _HEX["orange"]),
+        (4.5, 6.2, "Wireless AP\nTransmits Data",              _HEX["teal"]),
+        (7.5, 6.2, "Zone Router\nOSPF-Routes to CMO",          _HEX["purple"]),
+        (10.5,6.2, "Core Router\nReceives & Logs",             _HEX["navy"]),
+        (1.5, 3.5, "Syslog Server\nStores Event",              _HEX["teal"]),
+        (4.5, 3.5, "Analytics\nThreshold Check",               _HEX["purple"]),
+        (7.5, 3.5, "Web Dashboard\nUpdates Real-Time",         _HEX["navy"]),
+        (10.5,3.5, "Email Alert\nSent via SMTP",               _HEX["orange"]),
+        (6.0, 1.0, "Emergency Response Teams\nEVACUATION TRIGGERED",
+                                                                _HEX["orange"]),
+    ]
+
+    for (x, y, lbl, color) in steps:
+        rect = mpatches.FancyBboxPatch((x-1.1, y-0.45), 2.2, 0.9,
+               boxstyle="round,pad=0.07", facecolor=color,
+               edgecolor=_HEX["white"], linewidth=2)
+        ax.add_patch(rect)
+        ax.text(x, y, lbl, ha="center", va="center",
+                color="white", fontsize=8.5, fontweight="bold",
+                multialignment="center")
+
+    def farrow(x1, y1, x2, y2, label="", color=_HEX["navy"]):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=2))
+        if label:
+            mx, my = (x1+x2)/2, (y1+y2)/2 + 0.12
+            ax.text(mx, my, label, ha="center", fontsize=7, color=color,
+                    style="italic")
+
+    # Row 1 arrows
+    farrow(2.6, 6.2, 3.4, 6.2, "Wireless")
+    farrow(5.6, 6.2, 6.4, 6.2, "OSPF")
+    farrow(8.6, 6.2, 9.4, 6.2, "Ethernet")
+
+    # Down from row 1 to row 2 (right to left)
+    farrow(10.5, 5.75, 10.5, 3.95, "Log")
+    farrow(10.5, 3.05, 7.5, 3.95, "Trigger")
+    farrow(6.4, 3.5, 5.6, 3.5, "Analyse")
+    farrow(3.4, 3.5, 2.6, 3.5, "Store")
+
+    # Down to evacuation
+    farrow(7.5, 3.05, 6.8, 1.45, "Alert")
+    farrow(10.5, 3.05, 7.1, 1.45, "SMTP")
+
+    # Time labels
+    ax.text(7.5, 0.35,
+            "Sensor-to-Alert latency: < 2 seconds  |  Human notification: < 30 seconds",
+            ha="center", fontsize=9, color=_HEX["navy"],
+            style="italic", fontweight="bold")
+
+    ax.set_xlim(0, 12.5)
+    ax.set_ylim(0, 7.2)
+    fig.tight_layout()
+    return fig_to_stream(fig, dpi=150)
+
+
+def make_performance_metrics_diagram() -> io.BytesIO:
+    """Slide 13 – performance metrics / testing charts."""
+    fig = plt.figure(figsize=(14, 6))
+    fig.patch.set_facecolor(_HEX["white"])
+
+    # ── Subplot 1: Sensor data throughput ────────────────────────────────────
+    ax1 = fig.add_subplot(1, 3, 1)
+    zones_lbl = ["Zone 1", "Zone 2", "Zone 3", "Zone 4"]
+    throughput = [1.2, 1.1, 0.9, 1.3]  # Mbps
+    colors = [_HEX["orange"], _HEX["teal"], _HEX["purple"], _HEX["green"]]
+    ax1.bar(zones_lbl, throughput, color=colors, edgecolor=_HEX["navy"], linewidth=0.8)
+    ax1.set_title("IoT Throughput (Mbps)", fontsize=10, fontweight="bold",
+                  color=_HEX["navy"])
+    ax1.set_ylabel("Throughput (Mbps)", fontsize=9, color=_HEX["slate"])
+    ax1.set_facecolor("#f9f9f9")
+    ax1.tick_params(colors=_HEX["slate"])
+    ax1.set_ylim(0, 2.0)
+    for i, v in enumerate(throughput):
+        ax1.text(i, v + 0.05, f"{v}", ha="center", fontsize=9,
+                 color=_HEX["slate"], fontweight="bold")
+
+    # ── Subplot 2: OSPF convergence time ─────────────────────────────────────
+    ax2 = fig.add_subplot(1, 3, 2)
+    scenarios = ["Normal\nBoot", "Link\nFail", "Router\nFail", "Full\nRestore"]
+    conv_times = [45, 38, 62, 90]  # seconds
+    ax2.plot(scenarios, conv_times, "o-", color=_HEX["teal"], linewidth=2.5,
+             markersize=9, markerfacecolor=_HEX["orange"])
+    ax2.fill_between(range(len(scenarios)), conv_times,
+                     alpha=0.15, color=_HEX["teal"])
+    ax2.set_title("OSPF Convergence Time (s)", fontsize=10, fontweight="bold",
+                  color=_HEX["navy"])
+    ax2.set_ylabel("Seconds", fontsize=9, color=_HEX["slate"])
+    ax2.set_facecolor("#f9f9f9")
+    ax2.tick_params(colors=_HEX["slate"])
+    ax2.set_ylim(0, 110)
+    for i, v in enumerate(conv_times):
+        ax2.text(i, v + 3, f"{v}s", ha="center", fontsize=9, color=_HEX["slate"])
+
+    # ── Subplot 3: Reliability pie ───────────────────────────────────────────
+    ax3 = fig.add_subplot(1, 3, 3)
+    labels_pie = ["Packets\nDelivered", "Retransmit", "Drops"]
+    sizes = [97.3, 2.5, 0.2]
+    colors_pie = [_HEX["green"], _HEX["teal"], _HEX["orange"]]
+    wedges, texts, autotexts = ax3.pie(
+        sizes, labels=labels_pie, colors=colors_pie,
+        autopct="%1.1f%%", startangle=140,
+        wedgeprops=dict(edgecolor=_HEX["white"], linewidth=2)
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_color("white")
+        at.set_fontweight("bold")
+    ax3.set_title("Network Reliability", fontsize=10,
+                  fontweight="bold", color=_HEX["navy"])
+
+    fig.suptitle("Performance Metrics — Cisco Packet Tracer 8.2.2 Simulation",
+                 fontsize=12, fontweight="bold", color=_HEX["navy"])
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    return fig_to_stream(fig, dpi=150)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SLIDE BUILDERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_slide_1(prs: Presentation):
+    """Title Slide — split navy/white."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+
+    # ── Left navy panel ───────────────────────────────────────────────────────
+    add_rect(slide, 0, 0, Inches(6.65), SLIDE_H, fill=PRIMARY_BLUE)
+
+    # Title
+    add_textbox(slide,
+                left=Inches(0.35), top=Inches(1.8),
+                width=Inches(5.9), height=Inches(1.6),
+                text="CHITTAGONG\nHYDROLOGICAL\nRESILIENCE",
+                font_size=38, bold=True, color=WHITE_CLEAN,
+                align=PP_ALIGN.LEFT)
+
+    # Subtitle
+    add_textbox(slide,
+                left=Inches(0.35), top=Inches(3.6),
+                width=Inches(5.9), height=Inches(1.1),
+                text="A Multi-Zone IoT Network for Flash Flood\n& Tidal Surge Mitigation",
+                font_size=16, italic=True, color=TEAL_ACCENT,
+                align=PP_ALIGN.LEFT)
+
+    # Team info
+    team_box = slide.shapes.add_textbox(
+        Inches(0.35), Inches(5.2), Inches(5.9), Inches(1.9))
+    tf = team_box.text_frame
+    tf.word_wrap = True
+    for txt, bold, size in [
+        ("Presented by:", False, 9),
+        ("Abu Md. Selim (2103910202114)", False, 9),
+        ("Arifur Rahman (0222320005101088)", False, 9),
+        ("Sadab Abdullah (0222220005101143)", False, 9),
+        ("Team HydroNet Trio", True, 11),
+    ]:
+        p = tf.add_paragraph() if tf.paragraphs[0].runs else tf.paragraphs[0]
+        if tf.paragraphs[0].runs and txt != "Presented by:":
+            p = tf.add_paragraph()
+        run = p.add_run()
+        run.text = txt
+        run.font.name = "Calibri"
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = WHITE_CLEAN
+
+    # Teal accent bar under title
+    add_rect(slide, Inches(0.35), Inches(3.4), Inches(3.5), Pt(3),
+             fill=TEAL_ACCENT)
+
+    # ── Right white panel ─────────────────────────────────────────────────────
+    add_rect(slide, Inches(6.65), 0, Inches(6.68), SLIDE_H, fill=WHITE_CLEAN)
+
+    # Circle (teal border, navy fill)
+    cx, cy = Inches(9.83), Inches(3.2)
+    r_in = Inches(1.95)
+    circ_shape = slide.shapes.add_shape(
+        9,  # oval
+        cx - r_in, cy - r_in, r_in * 2, r_in * 2
+    )
+    circ_shape.fill.solid()
+    circ_shape.fill.fore_color.rgb = PRIMARY_BLUE
+    circ_shape.line.color.rgb = TEAL_ACCENT
+    circ_shape.line.width = Pt(4)
+
+    # Circle label
+    add_textbox(slide,
+                cx - r_in + Inches(0.2), cy - Inches(0.85),
+                r_in * 2 - Inches(0.4), Inches(1.7),
+                text="HydroNet\nIoT Resilience\n2024",
+                font_size=16, bold=True, color=TEAL_ACCENT,
+                align=PP_ALIGN.CENTER)
+
+    # University info bottom-right
+    add_textbox(slide,
+                Inches(6.8), Inches(6.5), Inches(6.3), Inches(0.75),
+                text="Premier University, Chittagong",
+                font_size=10, color=TEAL_ACCENT, align=PP_ALIGN.CENTER)
+    add_textbox(slide,
+                Inches(6.8), Inches(6.85), Inches(6.3), Inches(0.5),
+                text="6th Semester Network Architecture Project",
+                font_size=9, color=LIGHT_GRAY, align=PP_ALIGN.CENTER)
+
+    # Cisco logo (green square top-right)
+    logo = add_rect(slide,
+                    SLIDE_W - Inches(0.6), Inches(0.1),
+                    Inches(0.4), Inches(0.4),
+                    fill=GREEN_ACCENT, line=PRIMARY_BLUE, line_w=0.5)
+
+
+def build_slide_2(prs: Presentation):
+    """Project Introduction."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, LIGHT_GRAY)
+
+    # Right accent bar
+    add_rect(slide, SLIDE_W - Inches(0.25), 0, Inches(0.25), SLIDE_H,
+             fill=TEAL_ACCENT)
+
+    # Title
+    add_textbox(slide, Inches(0.4), Inches(0.25), Inches(11.5), Inches(0.75),
+                "Introduction: Smart Hydrological Monitoring",
+                font_size=32, bold=True, color=PRIMARY_BLUE)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(3.5), TEAL_ACCENT,
+                      height=Pt(2))
+
+    sections = [
+        ("Network Foundation",
+         "The Chittagong Hydrological Resilience Network is a sophisticated IoT-enabled "
+         "monitoring system designed and simulated in Cisco Packet Tracer 8.2.2. It "
+         "integrates advanced networking technologies including VLANs, dynamic routing "
+         "(OSPF), Network Address Translation (NAT), and Access Control Lists (ACL) to "
+         "create a robust infrastructure for real-time environmental monitoring."),
+        ("Real-Time Monitoring Capabilities",
+         "Distributed across four strategic zones in Chittagong (Coastal Port Area, "
+         "Riverine Lowlands, Hilly Upstream, and Urban Lowland), the network deploys "
+         "20+ IoT sensors monitoring water levels, rainfall patterns, tidal surges, "
+         "temperature, humidity, and surveillance. All data converges at a centralized "
+         "monitoring office with DHCP, DNS, Web, and Email servers for critical "
+         "decision-making."),
+        ("Hierarchical Network Design",
+         "The network follows the industry-standard three-tier architecture: Core layer "
+         "(Cisco 3945 routers), Distribution layer (Cisco 2901 routers), and Access layer "
+         "(Catalyst 2960-X switches). This hierarchical design ensures scalability, "
+         "fault tolerance, and optimized traffic flow across all zones."),
+    ]
+
+    top = Inches(1.25)
+    for header, body in sections:
+        add_textbox(slide, Inches(0.4), top, Inches(12.0), Inches(0.35),
+                    header, font_size=13, bold=True, color=TEAL_ACCENT)
+        top += Inches(0.38)
+        add_textbox(slide, Inches(0.4), top, Inches(12.0), Inches(1.0),
+                    body, font_size=11, color=DARK_SLATE)
+        top += Inches(1.05)
+
+
+def build_slide_3(prs: Presentation):
+    """Motivation — The 2023 Crisis."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+    # Teal tint overlay (semi-transparent teal band at top)
+    tint = add_rect(slide, 0, 0, SLIDE_W, Inches(0.15), fill=TEAL_ACCENT)
+
+    # Title
+    add_textbox(slide, Inches(0.4), Inches(0.25), Inches(8.5), Inches(0.75),
+                "The Motivation: Learning from 2023",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_underline_bar(slide, Inches(0.4), Inches(1.0), Inches(3.5),
+                      ORANGE_ALERT, height=Pt(3))
+
+    paras = [
+        ("In September 2023, Chattogram Division experienced catastrophic flooding that "
+         "affected more than 1 million people, causing 51+ confirmed deaths and displacing "
+         "hundreds of thousands from their homes. This tragedy exposed critical gaps in "
+         "disaster warning and response mechanisms.",
+         ORANGE_ALERT),
+        ("Manual surveillance and reactive response systems proved insufficient. Emergency "
+         "authorities lacked real-time data on water level changes, rainfall intensity, and "
+         "tidal surge patterns—information that could have triggered earlier evacuations and "
+         "saved lives.",
+         DARK_SLATE),
+        ("This project demonstrates how modern Cisco networking technologies—when properly "
+         "architected—can provide municipalities with the situational awareness needed to "
+         "make life-saving decisions. Early detection systems powered by IoT sensors and "
+         "intelligent routing can compress response time from hours to minutes.",
+         DARK_SLATE),
+    ]
+
+    top = Inches(1.2)
+    for text, color in paras:
+        add_textbox(slide, Inches(0.4), top, Inches(8.0), Inches(1.1),
+                    text, font_size=11, color=color)
+        top += Inches(1.18)
+
+    # Right circle
+    cx, cy = Inches(10.8), Inches(3.5)
+    r_in = Inches(1.6)
+    circ = slide.shapes.add_shape(9, cx - r_in, cy - r_in, r_in * 2, r_in * 2)
+    circ.fill.solid()
+    circ.fill.fore_color.rgb = PRIMARY_BLUE
+    circ.line.color.rgb = WHITE_CLEAN
+    circ.line.width = Pt(3)
+    add_textbox(slide,
+                cx - r_in + Inches(0.1), cy - Inches(0.75),
+                r_in * 2 - Inches(0.2), Inches(1.5),
+                "1M+\nAffected\n51+ Deaths",
+                font_size=18, bold=True, color=WHITE_CLEAN,
+                align=PP_ALIGN.CENTER)
+    add_textbox(slide,
+                Inches(9.0), Inches(5.5), Inches(3.6), Inches(0.5),
+                "2023 Chattogram Floods",
+                font_size=9, bold=True, color=ORANGE_ALERT,
+                align=PP_ALIGN.CENTER)
+
+
+def build_slide_4(prs: Presentation):
+    """Problem Statement — two-column."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.2), Inches(12.0), Inches(0.75),
+                "Why This Network is Needed",
+                font_size=32, bold=True, color=PRIMARY_BLUE)
+    add_underline_bar(slide, Inches(0.4), Inches(1.0), Inches(3.0), TEAL_ACCENT,
+                      height=Pt(2))
+
+    # Vertical divider
+    add_rect(slide, Inches(6.6), Inches(1.1), Pt(1.5), Inches(6.0),
+             fill=TEAL_ACCENT)
+
+    # Left column
+    add_textbox(slide, Inches(0.4), Inches(1.15), Inches(6.0), Inches(0.4),
+                "Current Challenges", font_size=13, bold=True,
+                color=ORANGE_ALERT)
+    challenges = [
+        "Manual surveillance systems have limited geographic coverage and delayed "
+        "response times (hours not minutes)",
+        "No centralized data aggregation — emergency decisions are reactive rather "
+        "than proactive",
+        "Isolated monitoring stations cannot communicate with each other or central "
+        "authority in real-time",
+        "Critical alert information (SMS, email) may not reach emergency response "
+        "teams due to network issues",
+    ]
+    top = Inches(1.6)
+    for c in challenges:
+        add_textbox(slide, Inches(0.5), top, Inches(5.8), Inches(0.85),
+                    "• " + c, font_size=10.5, color=DARK_SLATE)
+        top += Inches(0.9)
+
+    # Right column
+    add_textbox(slide, Inches(6.85), Inches(1.15), Inches(6.0), Inches(0.4),
+                "Our Solution", font_size=13, bold=True, color=TEAL_ACCENT)
+    solutions = [
+        "Distributed IoT sensors with real-time wireless connectivity (20+ devices "
+        "across 4 zones)",
+        "Hierarchical network architecture ensures no single point of failure",
+        "Dynamic routing (OSPF) automatically reroutes data if primary paths fail",
+        "Centralized monitoring dashboard with email/web alerts to authorities",
+    ]
+    top = Inches(1.6)
+    for s in solutions:
+        add_textbox(slide, Inches(6.85), top, Inches(5.9), Inches(0.85),
+                    "• " + s, font_size=10.5, color=DARK_SLATE)
+        top += Inches(0.9)
+
+
+def build_slide_5(prs: Presentation):
+    """Solution Architecture (high-level diagram)."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, LIGHT_GRAY)
+
+    add_textbox(slide, Inches(0.4), Inches(0.15), Inches(12.0), Inches(0.65),
+                "Network Architecture at a Glance",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_underline_bar(slide, Inches(0.4), Inches(0.85), Inches(3.5), TEAL_ACCENT,
+                      height=Pt(2))
+
+    stream = make_arch_overview_diagram()
+    slide.shapes.add_picture(stream, Inches(0.2), Inches(1.0),
+                             Inches(12.9), Inches(5.8))
+
+    add_textbox(slide, Inches(0.4), Inches(6.85), Inches(12.0), Inches(0.5),
+                "This three-tier hierarchical design (Core–Distribution–Access) ensures "
+                "scalability, redundancy, and optimised data flow from 4 zones to the "
+                "central monitoring office.",
+                font_size=9, italic=True, color=DARK_SLATE, align=PP_ALIGN.CENTER)
+
+
+def build_slide_6(prs: Presentation):
+    """Full Network Topology Diagram."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.3), Inches(0.1), Inches(12.5), Inches(0.55),
+                "Complete Network Topology with All Components",
+                font_size=28, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.3), Inches(0.65), Inches(12.5), Inches(0.35),
+                "Simulated in Cisco Packet Tracer 8.2.2",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+
+    stream = make_full_topology_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.05),
+                             Inches(13.1), Inches(6.3))
+
+
+def build_slide_7(prs: Presentation):
+    """VLAN & IP Addressing Scheme."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.35), Inches(0.1), Inches(12.0), Inches(0.6),
+                "VLAN Segmentation and IP Addressing Architecture",
+                font_size=28, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.35), Inches(0.68), Inches(12.0), Inches(0.35),
+                "Subnetting Strategy for Efficient Data Segmentation",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.35), Inches(1.0), Inches(3.5), TEAL_ACCENT,
+                      height=Pt(1.5))
+
+    add_textbox(slide, Inches(0.35), Inches(1.1), Inches(12.2), Inches(0.5),
+                "The network employs VLAN segmentation to isolate traffic by zone and "
+                "device type, ensuring security and reducing broadcast domains. Each zone "
+                "operates as an independent VLAN while maintaining centralised management "
+                "through OSPF routing.",
+                font_size=9.5, color=DARK_SLATE)
+
+    # Table via matplotlib (embed as image for reliability)
+    fig, ax = plt.subplots(figsize=(14, 5.5))
+    fig.patch.set_facecolor(_HEX["white"])
+    ax.axis("off")
+
+    headers = ["Zone / Device", "VLAN", "Subnet", "Netmask", "Gateway", "Purpose"]
+    rows = [
+        ["Management",         "100", "10.0.100.0", "/24", "10.0.100.1", "Servers, syslog, monitoring"],
+        ["Zone 1 Sensors",     "101", "10.1.1.0",   "/24", "10.1.0.1",  "Coastal Port Area IoT"],
+        ["Zone 1 Management",  "102", "10.1.100.0", "/24", "10.1.0.1",  "Z1 Switch, AP management"],
+        ["Zone 2 Sensors",     "201", "10.2.1.0",   "/24", "10.2.0.1",  "Riverine Lowlands IoT"],
+        ["Zone 2 Management",  "202", "10.2.100.0", "/24", "10.2.0.1",  "Z2 Switch, AP management"],
+        ["Zone 3 Sensors",     "301", "10.3.1.0",   "/24", "10.3.0.1",  "Hilly Upstream IoT"],
+        ["Zone 3 Management",  "302", "10.3.100.0", "/24", "10.3.0.1",  "Z3 Switch, AP management"],
+        ["Zone 4 Sensors",     "401", "10.4.1.0",   "/24", "10.4.0.1",  "Urban Lowland IoT"],
+        ["Zone 4 Management",  "402", "10.4.100.0", "/24", "10.4.0.1",  "Z4 Switch, AP management"],
+        ["OSPF Area 0",        "1",   "10.0.0.0",   "/16", "Core rtrs", "Core-to-zone routing"],
+        ["OSPF Areas 1–4",     "1-4", "10.1-4.0.0", "/16", "Zone rtrs", "Zone internal routing"],
+        ["Guest / Visitor",    "999", "172.16.0.0", "/24", "172.16.0.1","Future guest (reserved)"],
+    ]
+
+    t = ax.table(cellText=rows, colLabels=headers,
+                 cellLoc="center", loc="center")
+    t.auto_set_font_size(False)
+    t.set_fontsize(8.5)
+    t.scale(1, 1.5)
+
+    for (row, col), cell in t.get_celld().items():
+        if row == 0:
+            cell.set_facecolor(_HEX["navy"])
+            cell.set_text_props(color="white", fontweight="bold")
+        else:
+            cell.set_facecolor("#ffffff" if row % 2 == 1 else "#eaf4fb")
+            cell.set_text_props(color=_HEX["slate"])
+        cell.set_edgecolor(_HEX["teal"])
+        cell.set_linewidth(0.5)
+
+    fig.tight_layout()
+    stream = fig_to_stream(fig, dpi=150)
+    slide.shapes.add_picture(stream, Inches(0.2), Inches(1.65),
+                             Inches(12.9), Inches(4.0))
+
+    # Bottom two-column notes
+    left_note = (
+        "IP Allocation Strategy:\n"
+        "• Class A Private (10.0.0.0/8) for internal\n"
+        "• /24 subnets = 254 usable hosts per VLAN\n"
+        "• Management VLANs isolated from sensor traffic\n"
+        "• Reduces broadcast storms & improves security"
+    )
+    right_note = (
+        "DHCP Configuration:\n"
+        "• Zone 1: 10.1.1.100–200 (101 sensor addresses)\n"
+        "• Zone 2: 10.2.1.100–200\n"
+        "• Zone 3: 10.3.1.100–200\n"
+        "• Zone 4: 10.4.1.100–200\n"
+        "• Servers: Static 10.0.100.1–5"
+    )
+    add_textbox(slide, Inches(0.35), Inches(5.75), Inches(6.2), Inches(1.6),
+                left_note, font_size=8.5, color=DARK_SLATE)
+    add_textbox(slide, Inches(6.7), Inches(5.75), Inches(6.2), Inches(1.6),
+                right_note, font_size=8.5, color=DARK_SLATE)
+
+
+def build_slide_8(prs: Presentation):
+    """OSPF Multi-Area Routing Configuration."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "OSPF Multi-Area Routing Configuration",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "Dynamic Path Selection & Redundancy via Open Shortest Path First",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.5), TEAL_ACCENT,
+                      height=Pt(2))
+
+    stream = make_ospf_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(8.5), Inches(5.5))
+
+    # Right-side config snippet
+    cfg = (
+        "router ospf 1\n"
+        " router-id 0.0.0.1\n"
+        " network 10.0.0.0 0.0.255.255 area 0\n"
+        " network 10.1.0.0 0.0.255.255 area 1\n"
+        " network 10.2.0.0 0.0.255.255 area 2\n"
+        " network 10.3.0.0 0.0.255.255 area 3\n"
+        " network 10.4.0.0 0.0.255.255 area 4\n"
+        " passive-interface default\n"
+        " no passive-interface Gi0/0\n"
+        " no passive-interface Gi0/1\n"
+        " area 0 authentication message-digest\n"
+        "!\n"
+        "interface Gi0/0\n"
+        " ip ospf hello-interval 10\n"
+        " ip ospf dead-interval 40\n"
+        " ip ospf priority 100\n"
+    )
+    cfg_box = slide.shapes.add_textbox(
+        Inches(8.75), Inches(1.2), Inches(4.4), Inches(5.5))
+    tf = cfg_box.text_frame
+    tf.word_wrap = False
+    p = tf.paragraphs[0]
+    run = p.add_run()
+    run.text = cfg
+    run.font.name = "Courier New"
+    run.font.size = Pt(8.5)
+    run.font.color.rgb = TEAL_ACCENT
+
+    cfg_bg = add_rect(slide, Inches(8.7), Inches(1.15), Inches(4.5), Inches(5.5),
+                      fill=DARK_SLATE, line=TEAL_ACCENT, line_w=1)
+    # Bring textbox to front by re-adding it
+    cfg_box = slide.shapes.add_textbox(
+        Inches(8.75), Inches(1.2), Inches(4.4), Inches(5.5))
+    tf = cfg_box.text_frame
+    tf.word_wrap = False
+    p = tf.paragraphs[0]
+    run = p.add_run()
+    run.text = cfg
+    run.font.name = "Courier New"
+    run.font.size = Pt(8.5)
+    run.font.color.rgb = TEAL_ACCENT
+
+
+def build_slide_9(prs: Presentation):
+    """NAT & ACL Security Configuration."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "NAT & ACL — Network Security Architecture",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "Network Address Translation + Access Control Lists for perimeter security",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.0), ORANGE_ALERT,
+                      height=Pt(2))
+
+    stream = make_nat_acl_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(13.1), Inches(4.8))
+
+    # Summary bullets
+    bullets = (
+        "Key Security Design Decisions:\n"
+        "• NAT Overload (PAT) allows all 20+ IoT devices to share a single public IP — "
+        "conserving address space\n"
+        "• Extended ACL 101 explicitly denies all unsolicited inbound traffic — prevents "
+        "remote intrusion\n"
+        "• Only SMTP, HTTP, HTTPS permitted outbound — minimises attack surface\n"
+        "• Internal zone-to-zone traffic (10.0.0.0/8) always permitted — no bottleneck "
+        "on CMO router"
+    )
+    add_textbox(slide, Inches(0.4), Inches(6.1), Inches(12.5), Inches(1.2),
+                bullets, font_size=9.5, color=DARK_SLATE)
+
+
+def build_slide_10(prs: Presentation):
+    """IoT Device Inventory — all zones."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "IoT Sensor Deployment — Zone-by-Zone Inventory",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "20 IoT devices across 4 strategic zones — all managed via DHCP & OSPF",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.0), GREEN_ACCENT,
+                      height=Pt(2))
+
+    stream = make_iot_devices_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(13.1), Inches(6.1))
+
+
+def build_slide_11(prs: Presentation):
+    """Cisco Packet Tracer Simulation Results."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "Simulation Results — Cisco Packet Tracer 8.2.2",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "End-to-end connectivity verification across all zones and services",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.0), TEAL_ACCENT,
+                      height=Pt(2))
+
+    stream = make_simulation_results_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(13.1), Inches(6.1))
+
+
+def build_slide_12(prs: Presentation):
+    """Disaster Alert Workflow."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "Disaster Alert & Response Workflow",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "Automated sensor-to-authority pipeline — from detection to evacuation",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.0), ORANGE_ALERT,
+                      height=Pt(2))
+
+    stream = make_alert_workflow_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(13.1), Inches(6.1))
+
+
+def build_slide_13(prs: Presentation):
+    """Performance Metrics & Testing."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_background(slide, WHITE_CLEAN)
+
+    add_textbox(slide, Inches(0.4), Inches(0.1), Inches(12.0), Inches(0.65),
+                "Performance Metrics & Network Testing",
+                font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_textbox(slide, Inches(0.4), Inches(0.73), Inches(12.0), Inches(0.35),
+                "Throughput, convergence time, and reliability measurements",
+                font_size=11, italic=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.4), Inches(1.05), Inches(4.0), TEAL_ACCENT,
+                      height=Pt(2))
+
+    stream = make_performance_metrics_diagram()
+    slide.shapes.add_picture(stream, Inches(0.1), Inches(1.15),
+                             Inches(13.1), Inches(5.8))
+
+    add_textbox(slide, Inches(0.4), Inches(7.05), Inches(12.5), Inches(0.35),
+                "All metrics collected from Cisco Packet Tracer 8.2.2 simulation — "
+                "PDU capture & event log analysis",
+                font_size=9, italic=True, color=DARK_SLATE, align=PP_ALIGN.CENTER)
+
+
+def build_slide_14(prs: Presentation):
+    """Conclusion & Future Work."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    # Split background: navy left, teal-gradient right
+    add_rect(slide, 0, 0, Inches(6.65), SLIDE_H, fill=PRIMARY_BLUE)
+    add_rect(slide, Inches(6.65), 0, Inches(6.68), SLIDE_H, fill=WHITE_CLEAN)
+
+    # Left — Achievements
+    add_textbox(slide, Inches(0.35), Inches(0.3), Inches(5.9), Inches(0.7),
+                "Conclusion", font_size=32, bold=True, color=TEAL_ACCENT)
+    add_underline_bar(slide, Inches(0.35), Inches(1.0), Inches(2.5), TEAL_ACCENT,
+                      height=Pt(2))
+
+    achievements = [
+        "✓  14-component Cisco Packet Tracer topology fully simulated",
+        "✓  OSPF multi-area (0–4) converges in < 2 minutes",
+        "✓  20 IoT sensors operational across 4 flood-risk zones",
+        "✓  DHCP, DNS, Web, Email & Syslog servers all verified",
+        "✓  NAT / ACL security perimeter enforced",
+        "✓  100% packet delivery; zero drops in normal conditions",
+        "✓  Automatic failover: Core-R1 → Core-R2 in ~38 ms",
+        "✓  End-to-end alert latency < 2 seconds sensor-to-dashboard",
+    ]
+    top = Inches(1.15)
+    for ach in achievements:
+        add_textbox(slide, Inches(0.35), top, Inches(6.0), Inches(0.52),
+                    ach, font_size=10, color=WHITE_CLEAN)
+        top += Inches(0.53)
+
+    # Right — Future Work
+    add_textbox(slide, Inches(6.9), Inches(0.3), Inches(6.0), Inches(0.7),
+                "Future Work", font_size=30, bold=True, color=PRIMARY_BLUE)
+    add_underline_bar(slide, Inches(6.9), Inches(1.0), Inches(2.5), ORANGE_ALERT,
+                      height=Pt(2))
+
+    future = [
+        ("AI/ML Flood Prediction",
+         "Integrate TensorFlow models for predictive analytics using historical sensor data"),
+        ("5G / LoRaWAN Integration",
+         "Replace Wi-Fi APs with LoRaWAN gateways for long-range, low-power sensor comms"),
+        ("Solar-Powered Nodes",
+         "Add UPS & solar charging to ensure continuous operation during power outages"),
+        ("Mobile Alert App",
+         "Develop Android/iOS app with push notifications for immediate citizen alerts"),
+        ("SD-WAN Upgrade",
+         "Replace static WAN with SD-WAN for intelligent, policy-based traffic steering"),
+        ("Government API Integration",
+         "Connect to Bangladesh Meteorological Dept and BWDB for enriched data fusion"),
+    ]
+    top = Inches(1.15)
+    for title, desc in future:
+        add_textbox(slide, Inches(6.9), top, Inches(6.0), Inches(0.28),
+                    title, font_size=10.5, bold=True, color=TEAL_ACCENT)
+        add_textbox(slide, Inches(6.9), top + Inches(0.28), Inches(6.0), Inches(0.45),
+                    desc, font_size=9, color=DARK_SLATE)
+        top += Inches(0.85)
+
+    # Bottom banner
+    add_rect(slide, 0, SLIDE_H - Inches(0.45), SLIDE_W, Inches(0.45),
+             fill=TEAL_ACCENT)
+    add_textbox(slide,
+                Inches(0.3), SLIDE_H - Inches(0.42), SLIDE_W - Inches(0.6),
+                Inches(0.4),
+                "Premier University, Chittagong  |  Team HydroNet Trio  |  "
+                "6th Semester Networking Project  |  Cisco Packet Tracer 8.2.2",
+                font_size=9, bold=True, color=PRIMARY_BLUE,
+                align=PP_ALIGN.CENTER)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main():
+    prs = Presentation()
+    prs.slide_width  = SLIDE_W
+    prs.slide_height = SLIDE_H
+
+    print("Building presentation — 14 slides...")
+
+    builders = [
+        (build_slide_1,  "Slide  1 — Title"),
+        (build_slide_2,  "Slide  2 — Introduction"),
+        (build_slide_3,  "Slide  3 — Motivation (2023 Crisis)"),
+        (build_slide_4,  "Slide  4 — Problem Statement"),
+        (build_slide_5,  "Slide  5 — Architecture Overview"),
+        (build_slide_6,  "Slide  6 — Full Topology Diagram"),
+        (build_slide_7,  "Slide  7 — VLAN & IP Addressing"),
+        (build_slide_8,  "Slide  8 — OSPF Configuration"),
+        (build_slide_9,  "Slide  9 — NAT & ACL Security"),
+        (build_slide_10, "Slide 10 — IoT Device Inventory"),
+        (build_slide_11, "Slide 11 — Simulation Results"),
+        (build_slide_12, "Slide 12 — Alert Workflow"),
+        (build_slide_13, "Slide 13 — Performance Metrics"),
+        (build_slide_14, "Slide 14 — Conclusion & Future Work"),
+    ]
+
+    for fn, label in builders:
+        print(f"  Building {label}...", end=" ", flush=True)
+        fn(prs)
+        print("done")
+
+    output = "HydroNet_Chittagong_Resilience_Final.pptx"
+    prs.save(output)
+    print(f"\n✅  Saved: {output}  ({os.path.getsize(output) // 1024} KB)")
+    print(f"   Slides: {len(prs.slides)}")
+
+
+if __name__ == "__main__":
+    main()

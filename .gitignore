@@ -1,0 +1,8 @@
+# Generated output (run hydronet_generator.py to recreate)
+*.pptx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env
